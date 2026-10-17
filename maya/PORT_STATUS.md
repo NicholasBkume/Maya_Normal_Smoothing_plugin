@@ -1,4 +1,4 @@
-# Full-port implementation and validation matrix — 0.9.4
+# Full-port implementation and validation matrix — 0.9.5
 
 Reference: supplied Abnormal 1.1.5 source. Original MIT attribution is retained.
 "Implemented" below describes code, not an unrun Maya result.
@@ -19,7 +19,7 @@ Reference: supplied Abnormal 1.1.5 source. Original MIT attribution is retained.
 | Saved preferences and scoped shortcuts | Validated optionVar schema, panel and active-viewport scopes, actual host Qt selection | Pure schema tests pass. Host round-trip/scope/manual tests pending. |
 | Performance and reversible scene writes | Bulk topology/normal reads, shape-resolution caching, equal-vector command grouping, adaptive overlay interval and history limit | CPU profiling saved in PROFILE.json. Maya 10,000-corner timing/undo test included, pending. |
 | Save/reload and history/deformer workflows | Helpers do not serialize; stored data uses native attrs/colors; representative blendShape test | Previous storage and overlay serialization flags passed. Expanded representative history case pending; no general guarantee for every deformer stack. |
-| Maya host matrix | Native Qt query chooses PySide2/6, shiboken follows the loaded binding | Maya 2025 user validation covers 0.2.1. New 0.9.4 and Maya 2024/2026 are pending. |
+| Maya host matrix | Native Qt query chooses PySide2/6, shiboken follows the loaded binding | Maya 2025 user validation covers 0.2.1. New 0.9.5 and Maya 2024/2026 are pending. |
 
 All requested feature milestones now have implementation and associated tests.
 Release acceptance is blocked by the lack of an actual Maya runtime in the cloud,
@@ -37,8 +37,12 @@ cases and arbitrary deformer stacks require asset-specific validation.
 
 ## Maya 2025 reported host findings (0.9.1–0.9.2)
 
-On Maya 2025, 25/26 automated cases passed in both 0.9.1 and 0.9.2, including the four-argument picking API fix. Both revisions failed the old shading test by requiring a hard cube's split face normals to remain identical after softening all edges. Maya's native softening can change normal IDs/values to share vertex normals. Version 0.9.4 uses native `polySoftEdge` semantics, tests its results against an equivalent Maya-native operation, and requires exact restoration through native and editor undo/redo and cancel. **Maya 2025 execution of 0.9.4 is still pending; do not claim 26/26 until rerun.**
+On Maya 2025, 25/26 automated cases passed in both 0.9.1 and 0.9.2, including the four-argument picking API fix. Both revisions failed the old shading test by requiring a hard cube's split face normals to remain identical after softening all edges. Maya's native softening can change normal IDs/values to share vertex normals. Version 0.9.5 uses native `polySoftEdge` semantics, tests its results against an equivalent Maya-native operation, and requires exact restoration through native and editor undo/redo and cancel. **Maya 2025 execution of 0.9.5 is still pending; do not claim 26/26 until rerun.**
 
-## Maya 2025 validation update (0.9.3 → 0.9.4)
+## Maya 2025 validation update (0.9.3 → 0.9.5)
 
-Maya 2025 reported 25/26 for 0.9.3. The sole test failure is **session undo did not restore original edge flags**, after all native softening and native undo/redo assertions had already passed. The local history mechanism intentionally captures changes made by native Maya undo/redo as an additional snapshot, and the previous test assumed that a single session step always skips external changes. 0.9.4 checks for an externally changed selection or negligible normal-round-trip state, restores that intermediate snapshot if present, and then verifies original edge flags, normals and lock states following the next editor undo. Unexpected changes to locks/edge state remain failures. Maya runtime validation of 0.9.4 is still pending; the 12 manual checks remain pending.
+Maya 2025 reported 25/26 for 0.9.3. The sole test failure is **session undo did not restore original edge flags**, after all native softening and native undo/redo assertions had already passed. The local history mechanism intentionally captures changes made by native Maya undo/redo as an additional snapshot, and the previous test assumed that a single session step always skips external changes. 0.9.5 checks for an externally changed selection or negligible normal-round-trip state, restores that intermediate snapshot if present, and then verifies original edge flags, normals and lock states following the next editor undo. Unexpected changes to locks/edge state remain failures. Maya runtime validation of 0.9.5 is still pending; the 12 manual checks remain pending.
+
+## Maya 2025 verification update: 0.9.4 → 0.9.5
+
+Maya 2025 reported 25/26 passed in 0.9.4. The remaining shading test passed its native Maya smooth/hard comparison, native undo/redo, editor session undo/redo, and original edge-flag restoration. The test then called `session.current()` after `session.restore()` had intentionally closed the session, raising `Start a new editing session`. Version 0.9.5 corrects the test by reading normals with `scene.capture(shape)` after close, and explicitly verifies the session is closed. The final normal and lock-state assertions remain. **0.9.5 requires an actual Maya 2025 run before claiming 26/26.** The 12 manual viewport checks remain outstanding.

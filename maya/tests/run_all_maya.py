@@ -45,7 +45,7 @@ def run(manual=True, report_path=None):
     if candidate and candidate.is_dir() and candidate not in Path(scene.__file__).resolve().parents:
         raise RuntimeError('An older Abnormal Maya is cached. Restart Maya and run this file again. Loaded: ' + scene.__file__)
     if not hasattr(scene.Session, 'history_step'):
-        raise RuntimeError('This runner requires Abnormal Maya 0.9.4. Download the new package and restart Maya.')
+        raise RuntimeError('This runner requires Abnormal Maya 0.9.5. Download the new package and restart Maya.')
     from abnormal_maya import overlay
     if not cmds.undoInfo(query=True, state=True):
         raise RuntimeError('Enable Maya undo before running these tests')
@@ -594,10 +594,13 @@ def run(manual=True, report_path=None):
         vectors(session.current().normals,expected_hard,'Hard shading differs from native Maya')
 
         session.restore()
+        check(session.closed, 'Cancel should close the editing session')
+        # Session.current() must reject access after restore() closes it.
+        # Inspect the underlying mesh directly for post-cancel assertions.
         fn=om.MFnMesh(scene.mesh_path(shape))
         check(tuple(fn.isEdgeSmooth(i) for i in range(fn.numEdges))==original_flags,
               'Cancel did not restore edge flags')
-        vectors(session.current().normals,mesh.normals,'Cancel did not restore original normals')
+        vectors(scene.capture(shape).normals,mesh.normals,'Cancel did not restore original normals')
         _,ids=fn.getNormalIds()
         check(tuple(fn.isNormalLocked(i) for i in ids)==original_locks,
               'Cancel did not restore original normal locks')

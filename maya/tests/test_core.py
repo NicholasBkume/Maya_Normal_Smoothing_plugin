@@ -120,6 +120,16 @@ class NormalTests(unittest.TestCase):
         self.assertEqual(result[1], (1,0,0))
         self.assertEqual(result[0], mesh.normals[0])
 
+    def test_color_normal_decode_preserves_signed_corner_order(self):
+        result = core.normals_from_colors([(0,0,-1,1), (-1,0,0,1), (0,2,0,1)], 3)
+        self.assertEqual(result, [(0,0,-1), (-1,0,0), (0,1,0)])
+
+    def test_color_normal_decode_rejects_missing_or_corrupt_data(self):
+        for colors, count in [([],1), ([(0,0,0,1)],1), ([(-1,-1,-1,-1)],1),
+                              ([(float('nan'),0,1,1)],1), ([(1,0)],1)]:
+            with self.assertRaises(ValueError):
+                core.normals_from_colors(colors, count)
+
     def test_reset(self):
         mesh = fixture()
         result = core.edit(mesh, {0}, 'reset', reference=[(1,0,0)]*6)

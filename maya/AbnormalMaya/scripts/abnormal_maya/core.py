@@ -250,3 +250,22 @@ def paste(mesh, selected, source):
         j = max(source, key=lambda j: dot(mesh.tangents[i], mesh.tangents[j]))
         result[i] = mesh.normals[j]
     return result
+
+
+def normals_from_colors(colors, corner_count):
+    """Decode signed RGB normals from a face-major Maya color array.
+
+    Validate before scene writes; absent/unassigned colors must not silently
+    replace normals. Alpha below zero is Maya's default unset-color marker.
+    """
+    colors = [tuple(color) for color in colors]
+    if len(colors) != corner_count:
+        raise ValueError('Color set does not have one entry per face corner')
+    result = []
+    for i, color in enumerate(colors):
+        if (len(color) not in (3, 4) or not all(math.isfinite(x) for x in color)
+                or (len(color) == 4 and color[3] < 0)
+                or dot(color[:3], color[:3]) < EPSILON):
+            raise ValueError('Missing or invalid normal color at corner {}'.format(i))
+        result.append(unit(color[:3]))
+    return result

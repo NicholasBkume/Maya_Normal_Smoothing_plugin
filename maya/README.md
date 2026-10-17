@@ -1,4 +1,4 @@
-# Abnormal Maya 0.1.1
+# Abnormal Maya 0.1.2
 
 A Python 3 face-vertex normal editor targeting Autodesk Maya 2024+.
 Ported from the supplied Abnormal Blender add-on 1.1.5 by Cody Winchester /
@@ -10,6 +10,15 @@ at the repository root.
 is not installed in the build environment: scene commands, Qt docking, normal
 lock restoration, color storage, and viewport dragging require the supplied
 integration checks on an actual Maya installation before production use.
+
+## 0.1.2 Maya 2025 color API correction
+
+Color import now uses `MFnMesh.getFaceVertexColors`, the supported bulk API,
+rather than the nonexistent singular method. Signed RGB values are decoded in
+polygon-corner order and invalid/missing color data is rejected before editing.
+The user's Maya 2025 smoke run reached color import after the normal-write,
+undo/redo, mask, transform, and JSON checks; the full smoke test still needs to
+be rerun on this version.
 
 ## 0.1.1 normal-write correction
 
@@ -25,7 +34,7 @@ the previous module file is backed up first.
 
 ## Installation
 
-[Download AbnormalMaya-0.1.1.zip](releases/AbnormalMaya-0.1.1.zip?raw=true).
+[Download AbnormalMaya-0.1.2.zip](releases/AbnormalMaya-0.1.2.zip?raw=true).
 On GitHub, use the download button if the ZIP preview opens.
 
 1. Extract the distribution to a permanent location. Keep `install.py` and
@@ -216,7 +225,7 @@ To build the distributable ZIP and SHA-256 file:
 python3 maya/build.py
 ```
 
-The generated `maya/dist/AbnormalMaya-0.1.1.zip` excludes caches and preserves
+The generated `maya/dist/AbnormalMaya-0.1.2.zip` excludes caches and preserves
 license attribution. It includes the standalone numerical and Maya integration
 tests. The repository additionally contains `tests/blender_parity.py`, which
 compares nine algorithms with the original source under Blender; those checks

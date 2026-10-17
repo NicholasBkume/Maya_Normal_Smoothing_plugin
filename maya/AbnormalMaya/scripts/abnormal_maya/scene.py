@@ -301,8 +301,10 @@ class Session:
             raise ValueError('The abnormalNormals color set does not exist')
         values = None
         if not export:
-            values = [core.unit(tuple(fn.getFaceVertexColor(f, v, color_set))[:3], mesh.normals[i])
-                      for i, (f, v) in enumerate(zip(mesh.corner_faces, mesh.corner_vertices))]
+            # Maya exposes the plural bulk query, ordered by polygon corners.
+            # getFaceVertexColor (singular) is not an MFnMesh method.
+            colors = fn.getFaceVertexColors(colorSet=color_set)
+            values = core.normals_from_colors(colors, len(mesh.normals))
         with undo_chunk('Abnormal normal colors'):
             if export:
                 if color_set not in existing:

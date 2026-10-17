@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 
 
-def install(root):
+def install(root, replace_existing=False):
     from maya import cmds
     root = Path(root).resolve()
     package = root / 'AbnormalMaya'
@@ -17,9 +17,15 @@ def install(root):
     modules = Path(cmds.internalVar(userAppDir=True)) / 'modules'
     modules.mkdir(parents=True, exist_ok=True)
     destination = modules / 'AbnormalMaya.mod'
-    content = '+ AbnormalMaya 0.1.0 {}\n'.format(package.as_posix())
+    content = '+ AbnormalMaya 0.1.1 {}\n'.format(package.as_posix())
     if destination.exists() and destination.read_text(encoding='utf-8') != content:
-        raise RuntimeError('An AbnormalMaya.mod already exists at {}. Review it before replacing it.'.format(destination))
+        existing = destination.read_text(encoding='utf-8')
+        same_location = existing.strip().startswith('+ AbnormalMaya ') and existing.strip().endswith(' ' + package.as_posix()) and len(existing.splitlines()) == 1
+        if not same_location and not replace_existing:
+            raise RuntimeError('An AbnormalMaya.mod already exists at {}. To upgrade deliberately, call install(root, replace_existing=True); the old file will be backed up.'.format(destination))
+        from datetime import datetime
+        backup = destination.with_name('AbnormalMaya.mod.backup-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
+        backup.write_text(existing, encoding='utf-8')
     destination.write_text(content, encoding='utf-8')
     scripts = str(package / 'scripts')
     if scripts not in sys.path:

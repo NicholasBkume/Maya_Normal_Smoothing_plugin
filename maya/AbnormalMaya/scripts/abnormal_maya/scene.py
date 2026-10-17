@@ -102,10 +102,19 @@ def write_normals(shape, mesh, normals, lock_states=None):
         if lock_states is None and max(abs(a-b) for a, b in zip(old, new)) < 1e-7:
             continue
         item = component(shape, mesh, i)
-        cmds.polyNormalPerVertex(item, unFreezeNormal=True)
-        cmds.polyNormalPerVertex(item, xyz=tuple(new))
-        if lock_states is None or lock_states[i]:
-            cmds.polyNormalPerVertex(item, freezeNormal=True)
+        # Maya documents that assigning XYZ also locks this corner normal.
+        # Extra unlock/freeze commands can recalculate automatic normals and
+        # complicate redo. Use one absolute assignment for an ordinary edit.
+        cmds.polyNormalPerVertex(item, normalXYZ=tuple(new), relative=False)
+        if lock_states is not None and not lock_states[i]:
+            cmds.polyNormalPerVertex(item, unFreezeNormal=True)
+    actual = capture(shape).normals
+    for i, (expected, observed) in enumerate(zip(normals, actual)):
+        if max(abs(a-b) for a, b in zip(expected, observed)) > 2e-4:
+            raise RuntimeError(
+                'Maya normal readback failed at {}: expected {}, got {}. '
+                'Use Undo to revert this operation.'.format(
+                    component(shape, mesh, i), expected, observed))
 
 
 def _space_matrix(path, space):

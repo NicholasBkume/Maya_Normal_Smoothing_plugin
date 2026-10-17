@@ -231,3 +231,40 @@ tests. The repository additionally contains `tests/blender_parity.py`, which
 compares nine algorithms with the original source under Blender; those checks
 passed on Blender 4.3.2. They replace only mesh-write/UI/undo callbacks and do
 not establish Maya API or viewport compatibility.
+
+## Extended automated and guided GUI checks
+
+With the package installed, download `tests/run_all_maya.py` or the standalone
+[`AbnormalMaya-tests.zip`](releases/AbnormalMaya-tests.zip). In Maya's **Python**
+Script Editor:
+
+```python
+import runpy
+report = runpy.run_path(r"C:/path/to/run_all_maya.py")["run"]()
+```
+
+This runner tests all operation adapters, normal undo/redo and locks,
+object/world/view space, nonuniform/negative transforms, symmetry, clipboard,
+weights and rich selection, signed colors/JSON, lifecycle guards, Qt docking,
+panel controls, normal display, and rotation callbacks. It continues after a
+failure and prints each case and traceback, followed by totals. Native pointer
+coordinates are simulated for the callback test; this does **not** prove real
+mouse dispatch or native gesture undo grouping.
+
+A modeless checklist then offers a test cube and panel for actual pointer
+rotation, per-gesture undo/redo, docking, and visual inspection. Mark each as
+PASS/FAIL and click Print complete report. Closing the checklist removes its
+own test geometry. Tests do not reset or save the scene, and restore selection,
+current tool, and soft-selection settings. Like any Maya command test, they add
+global undo-history entries; do not assume your prior undo queue is unchanged.
+Use an otherwise idle Maya session; finish any active normal-editing gesture
+before running. An existing rotation context is preserved and its creation
+check is explicitly skipped. Restart Maya to test a fresh context.
+
+To skip the manual checklist: `run(manual=False)`. To save the automated report,
+pass `report_path=r"C:/path/to/report.json"`; the manual checklist prints its
+updated results separately. No report files are written by default.
+
+The extended GUI runner is syntax-checked here but has not been executed under
+Maya in the cloud. The original 0.1.2 smoke suite passed in the user's Maya
+2025 session; that does not imply these additional GUI checks have passed.

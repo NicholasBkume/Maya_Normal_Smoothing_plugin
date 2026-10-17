@@ -1,1 +1,1 @@
-+ AbnormalMaya 0.2.0 ./AbnormalMaya
++ AbnormalMaya 0.2.1 ./AbnormalMaya

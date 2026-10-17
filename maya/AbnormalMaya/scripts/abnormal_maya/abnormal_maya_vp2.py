@@ -6,7 +6,8 @@ third-party studio-wide distribution; initialization fails on ID collisions.
 from maya.api import OpenMaya as om
 from maya.api import OpenMayaUI as omui
 from maya.api import OpenMayaRender as omr
-from abnormal_maya import overlay
+import traceback
+from abnormal_maya import overlay, render
 
 TYPE_ID = om.MTypeId(0x0007F7F0)
 CLASSIFICATION = 'drawdb/geometry/abnormalNormalOverlay'
@@ -41,6 +42,7 @@ class OverlayNode(omui.MPxLocatorNode):
 class DrawData(om.MUserData):
     def __init__(self):
         super().__init__(False)
+        self.key = None
         self.batches = ()
         self.xray = False
         self.point_size = 4.0
@@ -72,42 +74,42 @@ class OverlayDraw(omr.MPxDrawOverride):
     def prepareForDraw(self, obj_path, camera_path, frame_context, old_data):
         data = old_data if isinstance(old_data,DrawData) else DrawData()
         key = om.MFnDependencyNode(obj_path.node()).findPlug('overlayKey',False).asString()
+        data.key = key
         payload = overlay.PAYLOADS.get(key, ((),False,4.0,1.5))
         geometry, data.xray, data.point_size, data.line_width = payload
-        data.batches = tuple((kind,om.MColor(color),
-                              om.MPointArray([om.MPoint(*p) for p in vertices]))
-                             for kind,color,vertices in geometry)
+        try:
+            data.batches = tuple((kind,om.MColor(color),
+                                  om.MPointArray([om.MPoint(*p) for p in vertices]))
+                                 for kind,color,vertices in geometry)
+        except Exception:
+            status = overlay.DRAW_STATUS.setdefault(key,dict(attempts=0,successes=0,errors=[]))
+            status['errors'].append(traceback.format_exc())
+            raise
         return data
 
     def addUIDrawables(self, obj_path, draw_manager, frame_context, data):
         if not isinstance(data,DrawData):
             return
-        draw_manager.beginDrawable(omr.MUIDrawManager.kNonSelectable)
-        xray_started = False
+        if not data.key or data.key not in overlay.PAYLOADS:
+            return
+        status = overlay.DRAW_STATUS.setdefault(data.key,dict(attempts=0,successes=0,errors=[]))
+        if status['errors']:
+            return  # Report once; the controller will surface the error.
+        status['attempts'] += 1
         try:
-            if data.xray:
-                draw_manager.beginDrawInXray()
-                xray_started = True
-            draw_manager.setLineWidth(data.line_width)
-            draw_manager.setPointSize(data.point_size)
-            for kind,color,vertices in data.batches:
-                draw_manager.setColor(color)
-                if kind == 'lines':
-                    draw_manager.lineList(vertices)
-                elif kind == 'points':
-                    draw_manager.points(vertices)
-                else:
-                    draw_manager.mesh(omr.MUIDrawManager.kTriangles,vertices)
-        finally:
-            try:
-                if xray_started:
-                    draw_manager.endDrawInXray()
-            finally:
-                draw_manager.endDrawable()
+            render.draw(draw_manager,data.batches,xray=data.xray,
+                        point_size=data.point_size,line_width=data.line_width,
+                        nonselectable=omr.MUIDrawManager.kNonSelectable,
+                        triangles=omr.MUIDrawManager.kTriangles)
+        except Exception:
+            status['errors'].append(traceback.format_exc())
+            raise
+        else:
+            status['successes'] += 1
 
 
 def initializePlugin(obj):
-    plugin = om.MFnPlugin(obj,'Abnormal Maya contributors','0.2.0','Any')
+    plugin = om.MFnPlugin(obj,'Abnormal Maya contributors','0.2.1','Any')
     plugin.registerNode(overlay.NODE_TYPE,TYPE_ID,OverlayNode.creator,OverlayNode.initialize,
                         om.MPxNode.kLocatorNode,CLASSIFICATION)
     try:

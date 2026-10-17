@@ -1,4 +1,4 @@
-# Abnormal Maya 0.2.0
+# Abnormal Maya 0.2.1
 
 A Python 3 face-vertex normal editor targeting Autodesk Maya 2024+.
 Ported from the supplied Abnormal Blender add-on 1.1.5 by Cody Winchester /
@@ -11,6 +11,17 @@ checks in the user's Maya 2025 session. Version 0.2.0 adds an optional custom
 Viewport 2.0 overlay and session visibility. Its 35 host-independent tests pass;
 new Maya plugin/rendering checks have not been run in the cloud. Keep using
 native normal display if the optional overlay is unavailable.
+
+## 0.2.1 Maya 2025 overlay corrections
+
+Helper creation/removal explicitly preserves Maya's API selection list. Tests
+compare selected corner identity, not the transform/shape string alias, which
+can change when adding a locator shape. Draw submissions explicitly specify
+`draw2D=False` for points and line lists. Render callback failures are retained
+per controller and surfaced to the UI/runner; tests now require a completed
+native draw callback rather than merely a published geometry payload.
+The 38 local tests pass; the corrected native renderer still needs Maya rerun.
+Restart Maya to unload the old Python draw plugin before testing this package.
 
 ## 0.2.0 viewport feedback milestone
 
@@ -86,7 +97,7 @@ the previous module file is backed up first.
 
 ## Installation
 
-[Download AbnormalMaya-0.2.0.zip](releases/AbnormalMaya-0.2.0.zip?raw=true).
+[Download AbnormalMaya-0.2.1.zip](releases/AbnormalMaya-0.2.1.zip?raw=true).
 On GitHub, use the download button if the ZIP preview opens.
 
 1. Extract the distribution to a permanent location. Keep `install.py` and
@@ -282,7 +293,7 @@ To build the distributable ZIP and SHA-256 file:
 python3 maya/build.py
 ```
 
-The generated `maya/dist/AbnormalMaya-0.2.0.zip` excludes caches and preserves
+The generated `maya/dist/AbnormalMaya-0.2.1.zip` excludes caches and preserves
 license attribution. It includes the standalone numerical and Maya integration
 tests. The repository additionally contains `tests/blender_parity.py`, which
 compares nine algorithms with the original source under Blender; those checks

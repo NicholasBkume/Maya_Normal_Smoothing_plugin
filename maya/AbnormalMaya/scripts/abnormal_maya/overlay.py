@@ -14,6 +14,7 @@ from . import core, display, scene
 
 NODE_TYPE = 'abnormalNormalOverlay'
 PAYLOADS = {}
+DRAW_STATUS = {}
 
 
 @contextmanager
@@ -45,9 +46,10 @@ class Controller:
         self.node = None
         self.node_uuid = None
         self._previous = None
-        load_plugin()
-        parent = cmds.listRelatives(session.shape, parent=True, fullPath=True)[0]
+        saved_selection = om.MGlobal.getActiveSelectionList()
         try:
+            load_plugin()
+            parent = cmds.listRelatives(session.shape, parent=True, fullPath=True)[0]
             with transient_changes():
                 self.node = cmds.createNode(NODE_TYPE, name='abnormalNormalOverlayShape#',
                                             parent=parent, skipSelect=True)
@@ -60,6 +62,10 @@ class Controller:
         except Exception:
             self.close()
             raise
+        finally:
+            # Node creation/plugin loading may canonicalize component paths or
+            # alter selection despite skipSelect. Restore the actual API list.
+            om.MGlobal.setActiveSelectionList(saved_selection,om.MGlobal.kReplaceList)
 
     def update(self, individual=True, xray=False, point_size=4, line_width=1.5, **options):
         mesh = self.session.current()
@@ -91,6 +97,13 @@ class Controller:
             selection.add(self.node)
             omr.MRenderer.setGeometryDrawDirty(selection.getDependNode(0))
             cmds.refresh(force=True)
+        self.check_render()
+
+    def check_render(self):
+        status = DRAW_STATUS.get(self.key,{})
+        if status.get('errors'):
+            raise RuntimeError('Viewport draw callback failed: ' + status['errors'][0])
+        return status
 
     def _resolve_node(self):
         if self.node_uuid:
@@ -100,7 +113,12 @@ class Controller:
     def close(self):
         self._resolve_node()
         PAYLOADS.pop(self.key,None)
+        DRAW_STATUS.pop(self.key,None)
         if self.node and cmds.objExists(self.node):
-            with transient_changes():
-                cmds.delete(self.node)
+            saved_selection = om.MGlobal.getActiveSelectionList()
+            try:
+                with transient_changes():
+                    cmds.delete(self.node)
+            finally:
+                om.MGlobal.setActiveSelectionList(saved_selection,om.MGlobal.kReplaceList)
         self.node = None

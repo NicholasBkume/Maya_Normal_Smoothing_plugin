@@ -17,7 +17,7 @@ def install(root, replace_existing=False):
     modules = Path(cmds.internalVar(userAppDir=True)) / 'modules'
     modules.mkdir(parents=True, exist_ok=True)
     destination = modules / 'AbnormalMaya.mod'
-    content = '+ AbnormalMaya 0.2.0 {}\n'.format(package.as_posix())
+    content = '+ AbnormalMaya 0.2.1 {}\n'.format(package.as_posix())
     if destination.exists() and destination.read_text(encoding='utf-8') != content:
         existing = destination.read_text(encoding='utf-8')
         same_location = existing.strip().startswith('+ AbnormalMaya ') and existing.strip().endswith(' ' + package.as_posix()) and len(existing.splitlines()) == 1

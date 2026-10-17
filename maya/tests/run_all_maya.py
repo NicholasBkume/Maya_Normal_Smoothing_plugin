@@ -383,15 +383,22 @@ def run(manual=True, report_path=None):
             raise Skip('Requires interactive Maya Viewport 2.0')
         cube, shape, session, mesh = fixture()
         original_selection = cmds.ls(selection=True,long=True,flatten=True) or []
+        original_corners = scene.selected_corners(shape,mesh,allow_empty=True)
         original_undo = cmds.undoInfo(query=True,state=True)
         before_keys = set(overlay.PAYLOADS)
         controller = overlay.Controller(session)
         key = controller.key
         try:
-            check((cmds.ls(selection=True,long=True,flatten=True) or []) == original_selection,
-                  'Overlay creation changed selection')
+            # Adding a second shape can change Maya's textual transform/shape
+            # alias while leaving the same corner selected. Compare identity.
+            check(scene.selected_corners(shape,mesh,allow_empty=True) == original_corners,
+                  'Overlay creation changed corner selection: before {}; after {}'.format(
+                      original_selection,cmds.ls(selection=True,long=True,flatten=True)))
             check(cmds.undoInfo(query=True,state=True)==original_undo,'Overlay changed undo enabled state')
             controller.update(wedges=True,size=.4)
+            status = controller.check_render()
+            check(status.get('successes',0)>0,
+                  'No completed VP2 draw callback observed; expose a model viewport and rerun')
             payload = overlay.PAYLOADS[key]
             line_count = sum(len(vertices)//2 for kind,color,vertices in payload[0] if kind=='lines')
             check(line_count==len(mesh.normals),'Overlay collapsed or lost face-corner normals')
@@ -434,6 +441,8 @@ def run(manual=True, report_path=None):
         panel.overlay_xray.setChecked(True)
         panel.refresh_overlay()
         check(key in overlay.PAYLOADS,'Panel did not publish overlay geometry')
+        status = panel.overlay_controller.check_render()
+        check(status.get('successes',0)>0,'Panel overlay did not complete a VP2 draw callback')
         panel.hide_normals()
         check(panel.session.visibility.hidden=={0},'Panel hide mismatch')
         panel.reveal_normals()

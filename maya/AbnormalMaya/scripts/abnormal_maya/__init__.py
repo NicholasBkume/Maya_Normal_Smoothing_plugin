@@ -1,5 +1,5 @@
 """Abnormal Maya: a face-vertex normal editor for Maya 2024+ (MIT)."""
-__version__ = '0.9.1'
+__version__ = '0.9.2'
 
 
 def show():

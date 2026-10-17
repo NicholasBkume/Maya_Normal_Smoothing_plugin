@@ -336,9 +336,13 @@ class Session:
         mesh=self.current()
         fn=om.MFnMesh(mesh_path(self.shape))
         with undo_chunk('Abnormal shading'):
-            # Freeze the original corner directions BEFORE changing edge flags.
-            # polyNormalPerVertex can update edge state when applied afterwards.
-            write_normals(self.shape,mesh,mesh.normals)
+            # 0.9.1 accidentally used write_normals(mesh.normals), which skips
+            # unchanged vectors and therefore NEVER froze the existing normals.
+            # Maya can recalculate unlocked face-vertex normals when an edge is
+            # softened/hardened. Lock them explicitly *before* polySoftEdge.
+            corners=[component(self.shape,mesh,i) for i in range(len(mesh.normals))]
+            if corners:
+                cmds.polyNormalPerVertex(corners,freezeNormal=True)
             self._set_smoothing([smooth]*fn.numEdges)
             preserved=self.current().normals
             for i,(before,after) in enumerate(zip(mesh.normals,preserved)):

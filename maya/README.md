@@ -1,14 +1,14 @@
-# Abnormal Maya 0.9.1 — full feature candidate
+# Abnormal Maya 0.9.2 — full feature candidate
 
 A Python 3 face-corner normal editor for Maya 2024+, based on the supplied
 MIT-licensed Abnormal 1.1.5 Blender add-on by Cody Winchester / BlenderNPR.
 The original Blender source remains at the repository root.
 
-[Download AbnormalMaya-0.9.1.zip](releases/AbnormalMaya-0.9.1.zip?raw=true).
+[Download AbnormalMaya-0.9.2.zip](releases/AbnormalMaya-0.9.2.zip?raw=true).
 
 The remaining feature milestones are implemented in this candidate. **Current
 Maya validation is pending**: the previous 0.2.1 release passed all 16 automated
-and six manual checks in the user's Maya 2025 session. Version 0.9.1 passes 57
+and six manual checks in the user's Maya 2025 session. Version 0.9.2 passes 57
 local tests and expanded Blender comparisons. Its new 26-case Maya suite and
 12 manual checks must run before a fully validated 1.0 claim. Maya 2024 and
 2026 have not been verified here. See [PORT_STATUS.md](PORT_STATUS.md).
@@ -21,8 +21,8 @@ local tests and expanded Blender comparisons. Its new 26-case Maya suite and
 
    ```python
    import runpy
-   runpy.run_path(r"C:/tools/AbnormalMaya-0.9.1/install.py")["install"](
-       r"C:/tools/AbnormalMaya-0.9.1"
+   runpy.run_path(r"C:/tools/AbnormalMaya-0.9.2/install.py")["install"](
+       r"C:/tools/AbnormalMaya-0.9.2"
    )
    ```
 
@@ -225,7 +225,7 @@ Run in Maya's **Python** tab after restarting and extracting this package:
 
 ```python
 import runpy
-report = runpy.run_path(r"C:/path/to/AbnormalMaya-0.9.1/tests/run_all_maya.py")["run"]()
+report = runpy.run_path(r"C:/path/to/AbnormalMaya-0.9.2/tests/run_all_maya.py")["run"]()
 ```
 
 The runner has 26 automated cases, including all previous behavior, normal-ID
@@ -275,7 +275,7 @@ between hosts. The tool does not mute or rewrite Maya's construction graph.
 Topology edits during a session invalidate mappings and are rejected; Finish
 still cleans up the session. Instances are rejected; make a mesh unique first.
 
-The 0.9.1 feature implementation is complete for the mapped workflows, but the
+The 0.9.2 feature implementation is complete for the mapped workflows, but the
 new Maya runtime tests, difficult production assets and 2024/2026 host coverage
 remain necessary. Nothing in the local test results establishes those outcomes.
 

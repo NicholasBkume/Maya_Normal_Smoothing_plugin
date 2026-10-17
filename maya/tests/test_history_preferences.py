@@ -18,6 +18,21 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(h.move(-1,{'n':1}),{'n':0})
         self.assertEqual(h.move(1,{'n':0}),{'n':1})
 
+    def test_external_selection_between_native_undo_and_editor_history(self):
+        # Native Maya undo/redo is a separate stack. An unrecorded selection
+        # change becomes a new step, so a first local undo rolls it back
+        # before local undo restores the preceding normal/shading operation.
+        old={'smoothing':(False,),'normals':((0,0,1),),'selected':(0,)}
+        shaded={'smoothing':(True,),'normals':((0,1,0),),'selected':(0,)}
+        after_native=dict(shaded,selected=())
+        h=history.History()
+        h.push(old)
+        h.push(shaded)
+        self.assertEqual(h.move(-1,after_native),shaded)
+        self.assertEqual(h.move(-1,shaded),old)
+        self.assertEqual(h.move(1,old),shaded)
+        self.assertEqual(h.move(1,shaded),after_native)
+
     def test_snapshots_are_independent_and_bounded(self):
         h=history.History(2);value={'mask':{0:.5}}
         h.push(value);value['mask'][0]=1

@@ -7,7 +7,7 @@ try:
     from PySide6 import QtWidgets, QtCore
 except ImportError:
     from PySide2 import QtWidgets, QtCore
-from . import core, scene, tools
+from . import core, scene, tools, overlay
 
 _PANEL = None
 
@@ -19,6 +19,9 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.setWindowTitle('Abnormal Maya — Normal Editor')
         self.setMinimumWidth(330)
         self.session = None
+        self.overlay_controller = None
+        self.overlay_timer = QtCore.QTimer(self)
+        self.overlay_timer.timeout.connect(self.refresh_overlay)
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
         outer = QtWidgets.QVBoxLayout(self)
         scroll = QtWidgets.QScrollArea()
@@ -36,6 +39,11 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.body_layout.addWidget(QtWidgets.QLabel('Use Maya component selection: vertex, face, edge, or vertex-face.'))
         self.row([('Select all', self.select_all), ('Invert', self.invert),
                   ('Undo', lambda: self.global_history(False)), ('Redo', lambda: self.global_history(True))])
+        self.row([('Hide selected normals', lambda: self.hide_normals(False)),
+                  ('Hide unselected normals', lambda: self.hide_normals(True)),
+                  ('Reveal normals', self.reveal_normals)])
+        self.row([('Visibility undo', lambda: self.visibility_history(False)),
+                  ('Visibility redo', lambda: self.visibility_history(True))])
         self.space = QtWidgets.QComboBox()
         self.space.addItems(['Object', 'World', 'View'])
         self.form('Editing space', self.space)
@@ -105,8 +113,24 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.display.toggled.connect(lambda _: self.run(self.draw_normals))
         self.body_layout.addWidget(self.display)
         self.normal_size = self.number(0.001, 10000, 0.4, 3)
-        self.form('Normal display size', self.normal_size)
+        self.form('Normal display size (overlay: world cm)', self.normal_size)
         self.normal_size.valueChanged.connect(lambda _: self.run(self.draw_normals))
+        self.overlay_enabled = QtWidgets.QCheckBox('Custom normal overlay (Viewport 2.0)')
+        self.overlay_enabled.toggled.connect(lambda _: self.run(self.toggle_overlay))
+        self.body_layout.addWidget(self.overlay_enabled)
+        self.overlay_selected_only = QtWidgets.QCheckBox('Overlay: show only selected normals')
+        self.overlay_scale_selected = QtWidgets.QCheckBox('Overlay: enlarge selected normals')
+        self.overlay_scale_selected.setChecked(True)
+        self.overlay_weights = QtWidgets.QCheckBox('Overlay: color by filter weights')
+        self.overlay_wedges = QtWidgets.QCheckBox('Overlay: draw individual corner wedges')
+        self.overlay_xray = QtWidgets.QCheckBox('Overlay: X-ray')
+        for check in (self.overlay_selected_only,self.overlay_scale_selected,self.overlay_weights,
+                      self.overlay_wedges,self.overlay_xray):
+            check.toggled.connect(lambda _: self.refresh_overlay())
+            self.body_layout.addWidget(check)
+        self.overlay_point_size = self.number(1,20,4,1)
+        self.form('Overlay point size (pixels)',self.overlay_point_size)
+        self.overlay_point_size.valueChanged.connect(lambda _: self.refresh_overlay())
         self.body_layout.addWidget(QtWidgets.QLabel('Finish keeps edits. Cancel restores session-start normals.\n'
                                               'Closing the panel keeps edits. Undo/Redo use Maya’s global history.'))
         self.body_layout.addStretch()
@@ -154,11 +178,13 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
     def finish(self):
         session = self.require()
         tools.stop()
+        self.stop_overlay()
         session.closed = True
         self.status.setText('Finished. Normal edits kept; Maya Undo remains available.')
 
     def cancel(self):
         tools.stop()
+        self.stop_overlay()
         self.require().restore()
         self.status.setText('Session-start normals restored. Maya Undo can undo the restore.')
 
@@ -228,12 +254,13 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
     def select_all(self):
         session = self.require()
         mesh = session.current()
-        cmds.select([scene.component(session.shape, mesh, i) for i in range(len(mesh.normals))], replace=True)
+        cmds.select([scene.component(session.shape, mesh, i) for i in range(len(mesh.normals))
+                     if i not in session.visibility.hidden], replace=True)
 
     def invert(self):
         session = self.require()
         mesh, selected = session.select(self.individual.isChecked())
-        cmds.select([scene.component(session.shape, mesh, i) for i in range(len(mesh.normals)) if i not in selected], replace=True)
+        cmds.select([scene.component(session.shape, mesh, i) for i in range(len(mesh.normals)) if i not in selected and i not in session.visibility.hidden], replace=True)
 
     def draw_normals(self):
         shape = self.require().shape
@@ -241,12 +268,72 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
             cmds.polyOptions(shape, displayNormal=self.display.isChecked(),
                              sizeNormal=self.normal_size.value(), point=False, facet=False, pointFacet=True)
 
+    def toggle_overlay(self):
+        self.stop_overlay(keep_checkbox=True)
+        if self.overlay_enabled.isChecked():
+            try:
+                self.overlay_controller = overlay.Controller(self.require())
+                self.refresh_overlay()
+                if self.overlay_controller:
+                    self.overlay_timer.start(200)
+            except Exception:
+                self.stop_overlay()
+                raise
+
+    def refresh_overlay(self):
+        if self.overlay_controller is None:
+            return
+        try:
+            self.overlay_controller.update(
+                individual=self.individual.isChecked(),size=self.normal_size.value(),
+                selected_only=self.overlay_selected_only.isChecked(),
+                scale_selected=self.overlay_scale_selected.isChecked(),
+                draw_weights=self.overlay_weights.isChecked(),
+                wedges=self.overlay_wedges.isChecked(),xray=self.overlay_xray.isChecked(),
+                point_size=self.overlay_point_size.value())
+        except Exception as exc:
+            self.stop_overlay()
+            self.status.setText('Overlay stopped: '+str(exc))
+            cmds.warning('Abnormal overlay: '+str(exc))
+
+    def stop_overlay(self, keep_checkbox=False):
+        self.overlay_timer.stop()
+        if self.overlay_controller is not None:
+            self.overlay_controller.close()
+            self.overlay_controller = None
+        if not keep_checkbox:
+            self.overlay_enabled.blockSignals(True)
+            self.overlay_enabled.setChecked(False)
+            self.overlay_enabled.blockSignals(False)
+
+    def hide_normals(self, unselected=False):
+        session = self.require()
+        # Native display cannot hide individual corner normals. Use the custom
+        # overlay for visibility without hiding any mesh faces/vertices.
+        self.display.setChecked(False)
+        if not self.overlay_enabled.isChecked():
+            self.overlay_enabled.setChecked(True)
+        if self.overlay_controller is None:
+            raise RuntimeError('Enable the custom overlay before hiding normals')
+        session.hide(self.individual.isChecked(),unselected=unselected)
+        self.refresh_overlay()
+
+    def reveal_normals(self):
+        self.require().visibility.reveal()
+        self.refresh_overlay()
+
+    def visibility_history(self, redo=False):
+        visibility = self.require().visibility
+        visibility.redo() if redo else visibility.undo()
+        self.refresh_overlay()
+
     def global_history(self, redo=False):
         cmds.redo() if redo else cmds.undo()
 
     def closeEvent(self, event):
         # Closing preserves scene changes. Explicit Cancel restores normals.
         tools.stop()
+        self.stop_overlay()
         self.session = None
         super().closeEvent(event)
 

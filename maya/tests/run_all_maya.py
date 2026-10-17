@@ -43,8 +43,9 @@ def run(manual=True, report_path=None):
     from abnormal_maya import core, scene, tools
     if candidate and candidate.is_dir() and candidate not in Path(scene.__file__).resolve().parents:
         raise RuntimeError('An older Abnormal Maya is cached. Restart Maya and run this file again. Loaded: ' + scene.__file__)
-    if not hasattr(scene.Session, 'mask_set'):
-        raise RuntimeError('This updated runner requires Abnormal Maya 0.1.3. Download the new package and restart Maya.')
+    if not hasattr(scene.Session, 'hide'):
+        raise RuntimeError('This updated runner requires Abnormal Maya 0.2.0. Download the new package and restart Maya.')
+    from abnormal_maya import overlay
     if not cmds.undoInfo(query=True, state=True):
         raise RuntimeError('Enable Maya undo before running these tests')
     if tools._TOOL is not None and cmds.currentCtx() == tools._CONTEXT:
@@ -355,6 +356,93 @@ def run(manual=True, report_path=None):
         panel.finish()
         check(panel.session.closed, 'Finish left session open')
 
+    @case('Session normal visibility, hidden edit protection and visibility history')
+    def visibility():
+        _, shape, session, mesh = fixture()
+        session.hide(True)
+        check(session.visibility.hidden == {0}, 'Hide selected corner mismatch')
+        expect_error(session.select, 'No visible selected normals')
+        selected(shape,mesh,[0,1])
+        session.apply('flip')
+        expected = list(mesh.normals)
+        expected[1] = core.mul(expected[1],-1)
+        vectors(session.current().normals,expected,'hidden corner must not change')
+        session.visibility.reveal()
+        check(not session.visibility.hidden,'Reveal did not clear hidden corners')
+        session.visibility.undo()
+        check(session.visibility.hidden == {0},'Visibility undo mismatch')
+        session.visibility.redo()
+        check(not session.visibility.hidden,'Visibility redo mismatch')
+        selected(shape,mesh,[1])
+        session.hide(True,unselected=True)
+        check(session.visibility.hidden == set(range(len(mesh.normals)))-{1},'Hide unselected mismatch')
+
+    @case('Viewport 2.0 plugin, display payload, rename and cleanup')
+    def viewport_overlay():
+        if cmds.about(batch=True):
+            raise Skip('Requires interactive Maya Viewport 2.0')
+        cube, shape, session, mesh = fixture()
+        original_selection = cmds.ls(selection=True,long=True,flatten=True) or []
+        original_undo = cmds.undoInfo(query=True,state=True)
+        before_keys = set(overlay.PAYLOADS)
+        controller = overlay.Controller(session)
+        key = controller.key
+        try:
+            check((cmds.ls(selection=True,long=True,flatten=True) or []) == original_selection,
+                  'Overlay creation changed selection')
+            check(cmds.undoInfo(query=True,state=True)==original_undo,'Overlay changed undo enabled state')
+            controller.update(wedges=True,size=.4)
+            payload = overlay.PAYLOADS[key]
+            line_count = sum(len(vertices)//2 for kind,color,vertices in payload[0] if kind=='lines')
+            check(line_count==len(mesh.normals),'Overlay collapsed or lost face-corner normals')
+            node_selection = om.MSelectionList()
+            node_selection.add(controller.node)
+            writable = om.MFnDependencyNode(node_selection.getDependNode(0)).canBeWritten
+            check(not (writable() if callable(writable) else writable),'Overlay helper must not serialize')
+            session.weights={0:1.0}
+            controller.update(wedges=True,draw_weights=True,xray=True)
+            check(overlay.PAYLOADS[key][1], 'X-ray flag not forwarded')
+            check(any(color==(1,0,0,1) for kind,color,vertices in overlay.PAYLOADS[key][0]),
+                  'Filter-weight colors missing')
+            session.visibility.hide({0})
+            controller.update()
+            check(sum(len(vertices)//2 for kind,color,vertices in overlay.PAYLOADS[key][0] if kind=='lines') == len(mesh.normals)-1,
+                  'Hidden normal still drawn')
+            cube=cmds.rename(cube,'abnormalOverlayRenamed_'+suffix)
+            controller.update()
+            check(cmds.objExists(controller.node),'Rename lost the overlay helper')
+            node=controller.node
+        finally:
+            controller.close()
+        check(not cmds.objExists(node),'Overlay cleanup left a helper shape')
+        check(set(overlay.PAYLOADS)==before_keys,'Overlay cleanup leaked display payload')
+        check(cmds.undoInfo(query=True,state=True)==original_undo,'Overlay cleanup changed undo enabled state')
+
+    @case('Panel custom overlay toggles, hiding and lifecycle cleanup')
+    def overlay_panel():
+        _, shape, _, mesh=fixture()
+        panel=new_panel()
+        panel.start()
+        panel.individual.setChecked(True)
+        panel.overlay_enabled.setChecked(True)
+        check(panel.overlay_controller is not None,'Panel could not start the custom overlay')
+        key=panel.overlay_controller.key
+        node=panel.overlay_controller.node
+        panel.overlay_wedges.setChecked(True)
+        panel.overlay_weights.setChecked(True)
+        panel.overlay_selected_only.setChecked(True)
+        panel.overlay_xray.setChecked(True)
+        panel.refresh_overlay()
+        check(key in overlay.PAYLOADS,'Panel did not publish overlay geometry')
+        panel.hide_normals()
+        check(panel.session.visibility.hidden=={0},'Panel hide mismatch')
+        panel.reveal_normals()
+        check(not panel.session.visibility.hidden,'Panel reveal mismatch')
+        panel.finish()
+        check(panel.overlay_controller is None and not panel.overlay_timer.isActive(),
+              'Finish left a display controller/timer running')
+        check(not cmds.objExists(node) and key not in overlay.PAYLOADS,'Finish leaked overlay helper data')
+
     @case('Native rotate-context creation and callback math (synthetic pointer input)')
     def rotation_callbacks():
         if cmds.about(batch=True):
@@ -426,7 +514,10 @@ def run(manual=True, report_path=None):
             pass
     manual_checks = ['Actual mouse press/drag/release rotates the selected normal',
                      'One native Undo reverses one complete mouse gesture; Redo restores it',
-                     'Dock/undock and normal-line appearance are usable at your display scale']
+                     'Dock/undock and normal-line appearance are usable at your display scale',
+                     'Custom VP2 overlay shows selection colors, wedges and positive mask-weight colors',
+                     'Custom overlay X-ray and selected-only toggles visibly change the display',
+                     'Hide/reveal and visibility undo/redo affect normals without hiding mesh geometry']
     report = dict(maya=cmds.about(version=True), package=abnormal_maya.__version__,
                   adapter=scene.__file__, automated=results,
                   manual=[dict(name=name, status='PENDING') for name in manual_checks])
@@ -474,6 +565,7 @@ def _show_manual(report):
             layout = QtWidgets.QVBoxLayout(self)
             text = QtWidgets.QLabel('Click Prepare, select the test corner, then use Drag to rotate.\n'
                 'Drag in the viewport; use Undo/Redo. Dock/undock the test panel.\n'
+                'Try the custom overlay toggles, masks, and Hide/Reveal controls.\n'
                 'Mark each result below. Close this window to remove the test cube.\n'
                 'Your scene is not reset or saved; test commands remain in undo history.')
             text.setWordWrap(True)
@@ -514,8 +606,9 @@ def _show_manual(report):
                 self.panel.show(dockable=True)
                 self.panel.individual.setChecked(True)
                 self.panel.start()
-                self.panel.display.setChecked(True)
-                self.panel.draw_normals()
+                self.panel.overlay_enabled.setChecked(True)
+                self.panel.overlay_wedges.setChecked(True)
+                self.panel.refresh_overlay()
                 # Enable explicit, observable rotation around X for the test.
                 self.panel.axis.setCurrentIndex(0)
                 print('Manual test cube:', self.root)

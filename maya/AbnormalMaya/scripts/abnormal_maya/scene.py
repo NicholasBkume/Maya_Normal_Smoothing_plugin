@@ -6,7 +6,7 @@ import re
 
 from maya import cmds
 from maya.api import OpenMaya as om
-from . import core
+from . import core, display
 
 
 @contextmanager
@@ -161,6 +161,7 @@ class Session:
         _, ids = fn.getNormalIds()
         self.locks = [fn.isNormalLocked(i) for i in ids]
         self.weights = None
+        self.visibility = display.Visibility(len(self.original.normals))
         self.clipboard = []
         self.mirrors = {}
         self.position_signature = tuple(self.original.points)
@@ -188,7 +189,10 @@ class Session:
 
     def select(self, individual=True):
         mesh = self.current()
-        return mesh, selected_corners(self.shape, mesh, individual)
+        selected = selected_corners(self.shape, mesh, individual) - self.visibility.hidden
+        if not selected:
+            raise ValueError('No visible selected normals. Reveal hidden normals or select others.')
+        return mesh, selected
 
     def apply(self, operation, individual=True, space='Object', auto_mirror=(), baseline=None, **options):
         mesh, selected = self.select(individual)
@@ -214,6 +218,8 @@ class Session:
         result = [_normal(n, matrix.inverse()) for n in result]
         for axis in auto_mirror:
             result = core.mirror(result, selected, self._mirror_map(mesh, axis), axis)
+        for i in self.visibility.hidden:
+            result[i] = mesh.normals[i]
         with undo_chunk('Abnormal ' + operation):
             write_normals(self.shape, mesh, result)
 
@@ -230,6 +236,8 @@ class Session:
             raise ValueError('No symmetry match within the specified tolerance')
         result = core.mirror(mesh.normals, selected, mapping, axis)
         # Explicit mirror, like source auto symmetry, writes destinations.
+        for i in self.visibility.hidden:
+            result[i] = mesh.normals[i]
         with undo_chunk('Abnormal mirror'):
             write_normals(self.shape, mesh, result)
 
@@ -255,8 +263,14 @@ class Session:
         mesh, selected = self.select(individual)
         result = core.paste(mesh, selected, self.clipboard)
         result = core.blend(mesh.normals, result, selected, self.weights)
+        for i in self.visibility.hidden:
+            result[i] = mesh.normals[i]
         with undo_chunk('Abnormal paste'):
             write_normals(self.shape, mesh, result)
+
+    def hide(self, individual=True, unselected=False):
+        _, selected = self.select(individual)
+        self.visibility.hide(selected, unselected=unselected)
 
     def mask_selection(self, individual=True):
         _, selected = self.select(individual)

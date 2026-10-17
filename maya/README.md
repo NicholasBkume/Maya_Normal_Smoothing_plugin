@@ -1,4 +1,4 @@
-# Abnormal Maya 0.1.3
+# Abnormal Maya 0.2.0
 
 A Python 3 face-vertex normal editor targeting Autodesk Maya 2024+.
 Ported from the supplied Abnormal Blender add-on 1.1.5 by Cody Winchester /
@@ -6,10 +6,49 @@ BlenderNPR, under the MIT license. This is a Maya implementation, not a Blender
 add-on that can be loaded into Maya. The original Blender source is preserved
 at the repository root.
 
-**Validation:** the host-independent algorithms are tested with CPython. Maya
-is not installed in the build environment: scene commands, Qt docking, normal
-lock restoration, color storage, and viewport dragging require the supplied
-integration checks on an actual Maya installation before production use.
+**Validation:** version 0.1.3 passed 13 automated checks and all three manual
+checks in the user's Maya 2025 session. Version 0.2.0 adds an optional custom
+Viewport 2.0 overlay and session visibility. Its 35 host-independent tests pass;
+new Maya plugin/rendering checks have not been run in the cloud. Keep using
+native normal display if the optional overlay is unavailable.
+
+## 0.2.0 viewport feedback milestone
+
+Enable **Custom normal overlay (Viewport 2.0)** after starting a session. It
+adds source-inspired HSV colors for normal/selected/active states, per-corner
+wedges, points, weighted normal colors, X-ray, selected-only drawing, and
+selected/active normal-length scaling. Display lengths are world centimeters;
+point sizes are pixels. The active color follows the last returned Maya
+component; it does not claim a Blender modal active-element history.
+
+**Hide selected normals**, **Hide unselected normals**, and **Reveal normals**
+are session-only. They do not hide mesh geometry. Hiding enables the custom
+overlay and disables the native normal display, which cannot hide individual
+corner normals. Hidden corners are protected during selected-normal edits,
+smoothing, clipboard paste, and mirror writes. Whole-mesh stored-data loads
+still intentionally operate on the whole mesh. Visibility has separate,
+bounded undo/redo buttons; this is not yet the source's combined modal history.
+
+The optional Python draw plugin is loaded on demand. It creates a nonselectable
+locator shape beneath the source transform, with `setDoNotWrite(True)`, and
+removes it on Finish, Cancel, overlay disable, or panel close. Its creation and
+deletion use scoped `stateWithoutFlush` changes so display helpers do not split
+normal-operation undo history. Mesh normal edits remain native undoable commands.
+The helper can mark the scene modified, but is excluded from saved scene data.
+Source renaming and removal are handled through UUIDs. A 200 ms main-thread
+timer publishes immutable world-space batches; draw callbacks do not query or
+modify the source mesh. Weight display uses 16 bins; edit weights stay precise.
+Large meshes may require turning the overlay off for responsiveness.
+
+This plugin uses a local prototype node ID, `0x0007F7F0`, and fails to load on
+an ID collision. Obtain a registered Autodesk node ID before distributing it
+studio-wide. No compiled binary or additional Python package is required.
+
+Run `tests/run_all_maya.py` from this package, then complete its six manual
+checks. The new automated cases cover hidden-edit protection, visibility
+history, plugin registration/payload lifecycle, and panel cleanup. Actual GPU
+appearance and X-ray occlusion remain visual checks on your Maya installation.
+See [PORT_STATUS.md](PORT_STATUS.md) for the remaining full-port milestones.
 
 ## 0.1.3 transform and set-mask validation
 
@@ -47,7 +86,7 @@ the previous module file is backed up first.
 
 ## Installation
 
-[Download AbnormalMaya-0.1.3.zip](releases/AbnormalMaya-0.1.3.zip?raw=true).
+[Download AbnormalMaya-0.2.0.zip](releases/AbnormalMaya-0.2.0.zip?raw=true).
 On GitHub, use the download button if the ZIP preview opens.
 
 1. Extract the distribution to a permanent location. Keep `install.py` and
@@ -171,13 +210,13 @@ construction history; validate your specific deformation stack separately.
 
 ## What is not a one-to-one port yet
 
-This release uses Maya native component selection and normal drawing. It does
-not reproduce Blender's GPU corner wedges, selected/active normal colors,
-weight heat map, per-normal hidden-state stack, custom rotation-ring gizmo,
-custom shortest-path/loop selection heuristics, in-viewport floating panels, or
-Blender hotkeys. It has no custom DG history node or compiled acceleration.
-Qt controls replace the Blender custom UI. Maya native selection tools cover
-basic selection but are not claimed to match all Blender selection algorithms.
+This release still uses Maya native component selection. Custom overlay wedges
+are display-only; picking them directly is the next selection-context milestone.
+Custom rotation-ring gizmos, Blender shortest-path/loop selection heuristics,
+in-viewport floating panels, unified selection/normal/filter session history,
+preferences/hotkeys, and fully live target movement remain to be ported. It has
+no custom DG history node or compiled acceleration. Qt controls replace the
+Blender widget framework; display geometry and styles are adapted to VP2.
 
 Native per-corner commands prioritize Maya-managed undo over speed; very large
 meshes and continuous drags can be slow and create substantial history. A
@@ -222,6 +261,11 @@ Tests have not been run under Maya in the cloud environment.
 
 ## Files
 
+- `display.py`: pure overlay geometry and visibility history.
+- `overlay.py`: source tracking and immutable viewport payloads.
+- `abnormal_maya_vp2.py`: optional Python Viewport 2.0 draw plugin.
+- `tests/test_display.py`: display/visibility regression tests.
+
 - `AbnormalMaya/scripts/abnormal_maya/core.py`: host-independent algorithms.
 - `scene.py`: Maya selection, transforms, native undoable writes, storage.
 - `ui.py`: Qt dockable panel and native selection/display controls.
@@ -238,7 +282,7 @@ To build the distributable ZIP and SHA-256 file:
 python3 maya/build.py
 ```
 
-The generated `maya/dist/AbnormalMaya-0.1.3.zip` excludes caches and preserves
+The generated `maya/dist/AbnormalMaya-0.2.0.zip` excludes caches and preserves
 license attribution. It includes the standalone numerical and Maya integration
 tests. The repository additionally contains `tests/blender_parity.py`, which
 compares nine algorithms with the original source under Blender; those checks
@@ -278,6 +322,6 @@ To skip the manual checklist: `run(manual=False)`. To save the automated report,
 pass `report_path=r"C:/path/to/report.json"`; the manual checklist prints its
 updated results separately. No report files are written by default.
 
-The extended GUI runner is syntax-checked here but has not been executed under
-Maya in the cloud. The original 0.1.2 smoke suite passed in the user's Maya
-2025 session; that does not imply these additional GUI checks have passed.
+The 0.1.3 extended runner passed all 13 automated and three manual checks in
+the user's Maya 2025 session. The 0.2.0 overlay additions are syntax-checked
+and numerically tested, but their new Maya checks still need to run.

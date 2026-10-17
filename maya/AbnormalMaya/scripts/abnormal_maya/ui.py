@@ -205,14 +205,7 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
 
     def set_mask(self):
         session = self.require()
-        mesh = session.current()
-        name = self.set_name.text().strip()
-        if not name or not cmds.objExists(name) or cmds.nodeType(name) != 'objectSet':
-            raise ValueError('Enter an existing Maya component set')
-        members = cmds.sets(name, query=True) or []
-        corners = scene.selected_corners(session.shape, mesh, individual=self.individual.isChecked(),
-                                         items=members, allow_empty=True)
-        session.weights = {i: 1.0 for i in corners}
+        session.mask_set(self.set_name.text().strip(), self.individual.isChecked())
 
     def pick_target(self):
         items = cmds.ls(selection=True, objectsOnly=True, long=True) or []

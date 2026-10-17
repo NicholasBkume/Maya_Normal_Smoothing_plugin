@@ -27,6 +27,11 @@ def run(manual=True, report_path=None):
     """
     from maya import cmds
     from maya.api import OpenMaya as om
+    candidate = None
+    if '__file__' in globals():
+        candidate = Path(__file__).resolve().parents[1] / 'AbnormalMaya' / 'scripts'
+        if (candidate / 'abnormal_maya' / '__init__.py').is_file():
+            sys.path.insert(0, str(candidate))
     try:
         import abnormal_maya
     except ImportError:
@@ -36,6 +41,10 @@ def run(manual=True, report_path=None):
         sys.path.insert(0, str(scripts))
         import abnormal_maya
     from abnormal_maya import core, scene, tools
+    if candidate and candidate.is_dir() and candidate not in Path(scene.__file__).resolve().parents:
+        raise RuntimeError('An older Abnormal Maya is cached. Restart Maya and run this file again. Loaded: ' + scene.__file__)
+    if not hasattr(scene.Session, 'mask_set'):
+        raise RuntimeError('This updated runner requires Abnormal Maya 0.1.3. Download the new package and restart Maya.')
     if not cmds.undoInfo(query=True, state=True):
         raise RuntimeError('Enable Maya undo before running these tests')
     if tools._TOOL is not None and cmds.currentCtx() == tools._CONTEXT:
@@ -46,10 +55,14 @@ def run(manual=True, report_path=None):
     soft_distance = cmds.softSelect(query=True, softSelectDistance=True)
     soft_falloff = cmds.softSelect(query=True, softSelectFalloff=True)
     previous_tool_object = tools._TOOL
-    preexisting_context = cmds.draggerContext(tools._CONTEXT, exists=True)
-    context_available = not preexisting_context
+    previous_context_name = tools._CONTEXT
     suffix = uuid.uuid4().hex[:10]
+    # Exercise the real native context under a unique test-only name.
+    # Existing user contexts are neither deleted nor replaced.
+    validation_context_name = 'abnormalValidationRotateContext_' + suffix
+    preexisting_context = False
     root = cmds.group(empty=True, name='abnormalValidation_' + suffix)
+    tools._CONTEXT = validation_context_name
     owned_sets = []
     owned_panels = []
     cases = []
@@ -142,8 +155,11 @@ def run(manual=True, report_path=None):
         path = scene.mesh_path(shape)
         n = om.MVector(*session.current().normals[0]).transformAsNormal(path.inclusiveMatrix()).normal()
         vectors([(n.x,n.y,n.z)], [axis], 'world align')
+        before = session.current().normals
         cmds.setAttr(cube+'.scaleX', 0)
         expect_error(lambda: session.apply('align', space='World'), 'singular')
+        cmds.setAttr(cube+'.scaleX', -2)
+        vectors(session.current().normals, before, 'singular rejection must not edit normals')
 
     @case('View-space rotation against active camera matrix')
     def view_space():
@@ -298,11 +314,23 @@ def run(manual=True, report_path=None):
         panel.invert()
         check(scene.selected_corners(shape, mesh) == set(range(len(mesh.normals)))-{0}, 'Invert mismatch')
         selected(shape, mesh, [0])
-        membership = cmds.sets([scene.component(shape,mesh,0)], name='abnormalMask_'+suffix)
+        # Vertex membership is a supported native Maya component-set type.
+        # Some Maya versions broaden stored vertex-face components to vertices.
+        membership = cmds.sets([shape+'.vtx[0]'], name='abnormalMask_'+suffix)
         owned_sets.append(membership)
         panel.set_name.setText(membership)
         panel.set_mask()
-        check(panel.session.weights == {0:1.0}, 'Component set mask mismatch')
+        expected_mask = {i:1.0 for i in mesh.vertex_corners[0]}
+        check(panel.session.weights == expected_mask,
+              'Component set mask mismatch: stored members {}; expected {}; got {}'.format(
+                  cmds.sets(membership,query=True), expected_mask, panel.session.weights))
+        explicit = scene.selected_corners(shape,mesh,items=[scene.component(shape,mesh,0)])
+        check(explicit == {0}, 'Explicit face-corner selection was broadened')
+        empty_set = cmds.sets(empty=True,name='abnormalEmptyMask_'+suffix)
+        owned_sets.append(empty_set)
+        panel.set_name.setText(empty_set)
+        panel.set_mask()
+        check(panel.session.weights == {}, 'Empty component set must protect every corner')
         panel.clear_mask()
         panel.center_target()
         check(all(math.isfinite(w.value()) for w in panel.target), 'Target center is invalid')
@@ -331,8 +359,6 @@ def run(manual=True, report_path=None):
     def rotation_callbacks():
         if cmds.about(batch=True):
             raise Skip('Requires a Maya viewport')
-        if not context_available:
-            raise Skip('Existing Abnormal context preserved; press Q and restart Maya to test creation')
         _, shape, session, mesh = fixture()
         tools.rotate(session, axis=(1,0,0))
         check(cmds.currentCtx() == tools._CONTEXT, 'Rotation context was not activated')
@@ -378,7 +404,6 @@ def run(manual=True, report_path=None):
             tools.stop()
             if cmds.draggerContext(tools._CONTEXT, exists=True):
                 cmds.deleteUI(tools._CONTEXT)
-        tools._TOOL = previous_tool_object
         for panel, control in owned_panels:
             try:
                 panel.close()
@@ -389,6 +414,8 @@ def run(manual=True, report_path=None):
         for node in owned_sets+[root]:
             if cmds.objExists(node):
                 cmds.delete(node)
+        tools._CONTEXT = previous_context_name
+        tools._TOOL = previous_tool_object
         cmds.softSelect(softSelectEnabled=soft_enabled, softSelectDistance=soft_distance,
                         softSelectFalloff=soft_falloff)
         surviving = [item for item in previous_selection if cmds.objExists(item)]

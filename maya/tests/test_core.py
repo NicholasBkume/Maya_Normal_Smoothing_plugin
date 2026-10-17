@@ -130,6 +130,17 @@ class NormalTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 core.normals_from_colors(colors, count)
 
+    def test_transform_condition_rejects_maya_clamped_zero_scale(self):
+        self.assertTrue(core.degenerate_basis([(1e-10,0,0),(0,1,0),(0,0,3)]))
+        self.assertTrue(core.degenerate_basis([(0,0,0),(0,1,0),(0,0,1)]))
+        self.assertTrue(core.degenerate_basis([(1,0,0),(1,1e-10,0),(0,0,1)]))
+        self.assertTrue(core.degenerate_basis([(float('nan'),0,0),(0,1,0),(0,0,1)]))
+
+    def test_transform_condition_accepts_small_uniform_and_negative_scale(self):
+        self.assertFalse(core.degenerate_basis([(1e-6,0,0),(0,1e-6,0),(0,0,1e-6)]))
+        self.assertFalse(core.degenerate_basis([(-2,0,0),(0,1,0),(0,0,3)]))
+        self.assertFalse(core.degenerate_basis([(0,-2,0),(1,0,0),(0,0,3)]))
+
     def test_reset(self):
         mesh = fixture()
         result = core.edit(mesh, {0}, 'reset', reference=[(1,0,0)]*6)

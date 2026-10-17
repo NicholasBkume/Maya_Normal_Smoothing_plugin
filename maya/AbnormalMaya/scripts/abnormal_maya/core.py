@@ -269,3 +269,20 @@ def normals_from_colors(colors, corner_count):
             raise ValueError('Missing or invalid normal color at corner {}'.format(i))
         result.append(unit(color[:3]))
     return result
+
+
+def degenerate_basis(rows, tolerance=1e-8):
+    """Reject singular/ill-conditioned linear transforms, independent of units.
+
+    Maya may evaluate an exact zero scale as a tiny nonzero scale. Absolute
+    determinants alone miss this; inspect relative axis lengths and normalized
+    volume as well. Uniformly tiny but well-conditioned scales remain valid.
+    """
+    lengths = [math.sqrt(dot(row, row)) for row in rows]
+    if not all(math.isfinite(value) for row in rows for value in row):
+        return True
+    largest = max(lengths)
+    if largest == 0 or min(lengths) <= largest * tolerance:
+        return True
+    normalized = [mul(row, 1.0 / length) for row, length in zip(rows, lengths)]
+    return abs(dot(normalized[0], cross(normalized[1], normalized[2]))) <= tolerance

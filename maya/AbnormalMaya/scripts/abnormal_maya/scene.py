@@ -66,8 +66,13 @@ def selected_mesh():
 def selected_corners(shape, mesh, individual=True, items=None, allow_empty=False):
     if items is None:
         items = cmds.ls(selection=True, long=True, flatten=True) or []
-    converted = (cmds.polyListComponentConversion(items, toVertexFace=True) or []) if items else []
-    corners = (cmds.ls(converted, long=True, flatten=True) or []) if converted else []
+    expanded = (cmds.ls(items, long=True, flatten=True) or []) if items else []
+    # Preserve explicit face-corner membership rather than converting it via
+    # vertices (which can broaden a partial corner mask).
+    explicit = [item for item in expanded if '.vtxFace[' in item]
+    other = [item for item in expanded if '.vtxFace[' not in item]
+    converted = (cmds.polyListComponentConversion(other, toVertexFace=True) or []) if other else []
+    corners = explicit + ((cmds.ls(converted, long=True, flatten=True) or []) if converted else [])
     lookup = {(f, v): i for i, (f, v) in enumerate(zip(mesh.corner_faces, mesh.corner_vertices))}
     result = set()
     for component in corners:
@@ -117,6 +122,18 @@ def write_normals(shape, mesh, normals, lock_states=None):
                     component(shape, mesh, i), expected, observed))
 
 
+def _validate_transform(path):
+    # Maya can clamp zero scales in its evaluated matrix. Check the authored
+    # channels too, including parents, before any inverse-normal operation.
+    node = path.fullPathName()
+    while node:
+        if cmds.objExists(node + '.scale'):
+            values = cmds.getAttr(node + '.scale')[0]
+            if any(not math.isfinite(v) or v == 0.0 for v in values):
+                raise ValueError('Transform is singular (zero/nonfinite scale): ' + node)
+        node = node.rsplit('|', 1)[0] if '|' in node else ''
+
+
 def _space_matrix(path, space):
     if space == 'Object':
         return om.MMatrix()
@@ -124,6 +141,7 @@ def _space_matrix(path, space):
     if space == 'View':
         from maya.api import OpenMayaUI as omui
         camera = omui.M3dView.active3dView().getCamera()
+        _validate_transform(camera)
         matrix = matrix * camera.inclusiveMatrixInverse()
     return matrix
 
@@ -178,9 +196,11 @@ class Session:
         if len(source_normals) != len(mesh.normals):
             raise ValueError('Drag baseline topology no longer matches')
         path = mesh_path(self.shape)
+        _validate_transform(path)
         matrix = _space_matrix(path, space)
-        if abs(matrix.det4x4()) < 1e-12:
-            raise ValueError('Mesh/camera transform is singular (zero scale)')
+        basis = [tuple(matrix[row*4+column] for column in range(3)) for row in range(3)]
+        if core.degenerate_basis(basis):
+            raise ValueError('Mesh/camera transform is singular or ill-conditioned (zero/near-zero scale)')
         working = core.Mesh([_triple(om.MPoint(*p) * matrix) for p in mesh.points],
                             mesh.faces, [_normal(n, matrix) for n in source_normals],
                             [_normal(n, matrix) for n in mesh.face_normals])
@@ -241,6 +261,18 @@ class Session:
     def mask_selection(self, individual=True):
         _, selected = self.select(individual)
         self.weights = {i: 1.0 for i in selected}
+
+    def mask_set(self, name, individual=True):
+        mesh = self.current()
+        if not name or not cmds.objExists(name) or cmds.nodeType(name) != 'objectSet':
+            raise ValueError('Enter an existing Maya component set')
+        selection = om.MSelectionList()
+        selection.add(name)
+        members = om.MFnSet(selection.getDependNode(0)).getMembers(True)
+        items = list(members.getSelectionStrings())
+        corners = selected_corners(self.shape, mesh, individual=individual,
+                                   items=items, allow_empty=True)
+        self.weights = {i: 1.0 for i in corners}
 
     def mask_soft_selection(self):
         mesh = self.current()

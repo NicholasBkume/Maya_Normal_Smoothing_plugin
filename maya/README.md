@@ -1,4 +1,4 @@
-# Abnormal Maya 0.1.2
+# Abnormal Maya 0.1.3
 
 A Python 3 face-vertex normal editor targeting Autodesk Maya 2024+.
 Ported from the supplied Abnormal Blender add-on 1.1.5 by Cody Winchester /
@@ -10,6 +10,19 @@ at the repository root.
 is not installed in the build environment: scene commands, Qt docking, normal
 lock restoration, color storage, and viewport dragging require the supplied
 integration checks on an actual Maya installation before production use.
+
+## 0.1.3 transform and set-mask validation
+
+Normal transforms now reject ill-conditioned bases, including Maya's tiny
+nonzero evaluation of a requested zero scale. The check uses relative axis
+lengths and normalized volume; uniformly small, well-conditioned transforms
+remain supported. Named masks read canonical `MFnSet` membership, and explicit
+face-corner selections bypass component conversion. Set masks honor the
+component type Maya actually stores; use vertex sets for stable per-vertex
+membership. The GUI test now validates a vertex set and an empty set separately
+from explicit corner selection, and prints actual membership on failure.
+The rotation test uses a unique temporary context and preserves existing ones.
+These corrections still require the updated Maya integration tests.
 
 ## 0.1.2 Maya 2025 color API correction
 
@@ -34,7 +47,7 @@ the previous module file is backed up first.
 
 ## Installation
 
-[Download AbnormalMaya-0.1.2.zip](releases/AbnormalMaya-0.1.2.zip?raw=true).
+[Download AbnormalMaya-0.1.3.zip](releases/AbnormalMaya-0.1.3.zip?raw=true).
 On GitHub, use the download button if the ZIP preview opens.
 
 1. Extract the distribution to a permanent location. Keep `install.py` and
@@ -225,7 +238,7 @@ To build the distributable ZIP and SHA-256 file:
 python3 maya/build.py
 ```
 
-The generated `maya/dist/AbnormalMaya-0.1.2.zip` excludes caches and preserves
+The generated `maya/dist/AbnormalMaya-0.1.3.zip` excludes caches and preserves
 license attribution. It includes the standalone numerical and Maya integration
 tests. The repository additionally contains `tests/blender_parity.py`, which
 compares nine algorithms with the original source under Blender; those checks
@@ -258,8 +271,8 @@ own test geometry. Tests do not reset or save the scene, and restore selection,
 current tool, and soft-selection settings. Like any Maya command test, they add
 global undo-history entries; do not assume your prior undo queue is unchanged.
 Use an otherwise idle Maya session; finish any active normal-editing gesture
-before running. An existing rotation context is preserved and its creation
-check is explicitly skipped. Restart Maya to test a fresh context.
+before running. An existing rotation context is preserved; creation and callbacks are tested
+under a unique temporary context name instead.
 
 To skip the manual checklist: `run(manual=False)`. To save the automated report,
 pass `report_path=r"C:/path/to/report.json"`; the manual checklist prints its

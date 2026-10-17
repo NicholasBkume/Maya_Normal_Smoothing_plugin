@@ -9,15 +9,15 @@ def build(destination=None):
     root = Path(__file__).resolve().parent
     destination = Path(destination) if destination else root / 'dist'
     destination.mkdir(parents=True, exist_ok=True)
-    archive = destination / 'AbnormalMaya-0.2.1.zip'
-    files = [root / 'install.py', root / 'AbnormalMaya.mod', root / 'README.md', root / 'PORT_STATUS.md',
-             root / 'tests' / 'test_core.py', root / 'tests' / 'test_display.py', root / 'tests' / 'test_render.py', root / 'tests' / 'maya_smoke.py',
-             root / 'tests' / 'run_all_maya.py']
+    archive = destination / 'AbnormalMaya-0.9.0.zip'
+    files = [root/'install.py',root/'AbnormalMaya.mod',root/'README.md',root/'PORT_STATUS.md']
+    files += [p for p in (root/'tests').glob('*.py') if p.name != 'blender_parity.py']
+    if (root/'PROFILE.json').exists(): files.append(root/'PROFILE.json')
     files += [p for p in (root / 'AbnormalMaya').rglob('*')
               if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc']
     with ZipFile(archive, 'w', ZIP_DEFLATED) as output:
         for source in sorted(files):
-            output.write(source, 'AbnormalMaya-0.2.1/' + source.relative_to(root).as_posix())
+            output.write(source, 'AbnormalMaya-0.9.0/' + source.relative_to(root).as_posix())
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_suffix('.zip.sha256').write_text(digest + '  ' + archive.name + '\n')
     with ZipFile(archive) as check:

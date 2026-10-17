@@ -1,0 +1,26 @@
+{
+  "python": "3.12.14",
+  "kind": "CPU algorithms only; not Maya API or GPU",
+  "meshes": [
+    {
+      "vertices": 1600,
+      "corners": 6084,
+      "mesh_build_seconds": 0.042353525000180525,
+      "overlay_geometry_seconds": 0.07568401699973037,
+      "draw_batches": 3,
+      "five_smooth_iterations_seconds": 0.10832748599932529,
+      "topology_and_path_seconds": 0.0077413119997800095,
+      "path_vertices": 79
+    },
+    {
+      "vertices": 10000,
+      "corners": 39204,
+      "mesh_build_seconds": 0.3232971359993826,
+      "overlay_geometry_seconds": 0.43484029499995813,
+      "draw_batches": 3,
+      "five_smooth_iterations_seconds": 0.7507559920004496,
+      "topology_and_path_seconds": 0.05162039799961349,
+      "path_vertices": 199
+    }
+  ]
+}

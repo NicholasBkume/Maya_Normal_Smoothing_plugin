@@ -7,6 +7,7 @@ transform; it does not write to saved scene files (MPxNode.setDoNotWrite).
 from contextlib import contextmanager
 from pathlib import Path
 import uuid
+import time
 from maya import cmds
 from maya.api import OpenMaya as om
 from maya.api import OpenMayaRender as omr
@@ -46,6 +47,7 @@ class Controller:
         self.node = None
         self.node_uuid = None
         self._previous = None
+        self.last_seconds=0
         saved_selection = om.MGlobal.getActiveSelectionList()
         try:
             load_plugin()
@@ -68,15 +70,20 @@ class Controller:
             om.MGlobal.setActiveSelectionList(saved_selection,om.MGlobal.kReplaceList)
 
     def update(self, individual=True, xray=False, point_size=4, line_width=1.5, **options):
+        started=time.perf_counter()
         mesh = self.session.current()
         self._resolve_node()
         if not self.node or not cmds.objExists(self.node):
             raise RuntimeError('Overlay helper was removed; toggle the custom overlay to recreate it')
         selected = scene.selected_corners(self.session.shape, mesh, individual,
                                          allow_empty=True) - self.session.visibility.hidden
+        if self.session.preview_selection is not None:
+            selected=set(self.session.preview_selection)-self.session.visibility.hidden
         items = cmds.ls(selection=True,long=True,flatten=True) or []
         active = scene.selected_corners(self.session.shape, mesh, individual,
                                        items=items[-1:],allow_empty=True) if items and '.' in items[-1] else set()
+        if self.session.active_corner is not None and self.session.active_corner in selected:
+            active={self.session.active_corner}
         path = scene.mesh_path(self.session.shape)
         scene._validate_transform(path)
         matrix = path.inclusiveMatrix()
@@ -98,6 +105,7 @@ class Controller:
             omr.MRenderer.setGeometryDrawDirty(selection.getDependNode(0))
             cmds.refresh(force=True)
         self.check_render()
+        self.last_seconds=time.perf_counter()-started
 
     def check_render(self):
         status = DRAW_STATUS.get(self.key,{})

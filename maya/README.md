@@ -1,338 +1,282 @@
-# Abnormal Maya 0.2.1
+# Abnormal Maya 0.9.0 — full feature candidate
 
-A Python 3 face-vertex normal editor targeting Autodesk Maya 2024+.
-Ported from the supplied Abnormal Blender add-on 1.1.5 by Cody Winchester /
-BlenderNPR, under the MIT license. This is a Maya implementation, not a Blender
-add-on that can be loaded into Maya. The original Blender source is preserved
-at the repository root.
+A Python 3 face-corner normal editor for Maya 2024+, based on the supplied
+MIT-licensed Abnormal 1.1.5 Blender add-on by Cody Winchester / BlenderNPR.
+The original Blender source remains at the repository root.
 
-**Validation:** version 0.1.3 passed 13 automated checks and all three manual
-checks in the user's Maya 2025 session. Version 0.2.0 adds an optional custom
-Viewport 2.0 overlay and session visibility. Its 35 host-independent tests pass;
-new Maya plugin/rendering checks have not been run in the cloud. Keep using
-native normal display if the optional overlay is unavailable.
+[Download AbnormalMaya-0.9.0.zip](releases/AbnormalMaya-0.9.0.zip?raw=true).
 
-## 0.2.1 Maya 2025 overlay corrections
+The remaining feature milestones are implemented in this candidate. **Current
+Maya validation is pending**: the previous 0.2.1 release passed all 16 automated
+and six manual checks in the user's Maya 2025 session. Version 0.9.0 passes 57
+local tests and expanded Blender comparisons. Its new 26-case Maya suite and
+12 manual checks must run before a fully validated 1.0 claim. Maya 2024 and
+2026 have not been verified here. See [PORT_STATUS.md](PORT_STATUS.md).
 
-Helper creation/removal explicitly preserves Maya's API selection list. Tests
-compare selected corner identity, not the transform/shape string alias, which
-can change when adding a locator shape. Draw submissions explicitly specify
-`draw2D=False` for points and line lists. Render callback failures are retained
-per controller and surfaced to the UI/runner; tests now require a completed
-native draw callback rather than merely a published geometry payload.
-The 38 local tests pass; the corrected native renderer still needs Maya rerun.
-Restart Maya to unload the old Python draw plugin before testing this package.
+## Install or upgrade
 
-## 0.2.0 viewport feedback milestone
-
-Enable **Custom normal overlay (Viewport 2.0)** after starting a session. It
-adds source-inspired HSV colors for normal/selected/active states, per-corner
-wedges, points, weighted normal colors, X-ray, selected-only drawing, and
-selected/active normal-length scaling. Display lengths are world centimeters;
-point sizes are pixels. The active color follows the last returned Maya
-component; it does not claim a Blender modal active-element history.
-
-**Hide selected normals**, **Hide unselected normals**, and **Reveal normals**
-are session-only. They do not hide mesh geometry. Hiding enables the custom
-overlay and disables the native normal display, which cannot hide individual
-corner normals. Hidden corners are protected during selected-normal edits,
-smoothing, clipboard paste, and mirror writes. Whole-mesh stored-data loads
-still intentionally operate on the whole mesh. Visibility has separate,
-bounded undo/redo buttons; this is not yet the source's combined modal history.
-
-The optional Python draw plugin is loaded on demand. It creates a nonselectable
-locator shape beneath the source transform, with `setDoNotWrite(True)`, and
-removes it on Finish, Cancel, overlay disable, or panel close. Its creation and
-deletion use scoped `stateWithoutFlush` changes so display helpers do not split
-normal-operation undo history. Mesh normal edits remain native undoable commands.
-The helper can mark the scene modified, but is excluded from saved scene data.
-Source renaming and removal are handled through UUIDs. A 200 ms main-thread
-timer publishes immutable world-space batches; draw callbacks do not query or
-modify the source mesh. Weight display uses 16 bins; edit weights stay precise.
-Large meshes may require turning the overlay off for responsiveness.
-
-This plugin uses a local prototype node ID, `0x0007F7F0`, and fails to load on
-an ID collision. Obtain a registered Autodesk node ID before distributing it
-studio-wide. No compiled binary or additional Python package is required.
-
-Run `tests/run_all_maya.py` from this package, then complete its six manual
-checks. The new automated cases cover hidden-edit protection, visibility
-history, plugin registration/payload lifecycle, and panel cleanup. Actual GPU
-appearance and X-ray occlusion remain visual checks on your Maya installation.
-See [PORT_STATUS.md](PORT_STATUS.md) for the remaining full-port milestones.
-
-## 0.1.3 transform and set-mask validation
-
-Normal transforms now reject ill-conditioned bases, including Maya's tiny
-nonzero evaluation of a requested zero scale. The check uses relative axis
-lengths and normalized volume; uniformly small, well-conditioned transforms
-remain supported. Named masks read canonical `MFnSet` membership, and explicit
-face-corner selections bypass component conversion. Set masks honor the
-component type Maya actually stores; use vertex sets for stable per-vertex
-membership. The GUI test now validates a vertex set and an empty set separately
-from explicit corner selection, and prints actual membership on failure.
-The rotation test uses a unique temporary context and preserves existing ones.
-These corrections still require the updated Maya integration tests.
-
-## 0.1.2 Maya 2025 color API correction
-
-Color import now uses `MFnMesh.getFaceVertexColors`, the supported bulk API,
-rather than the nonexistent singular method. Signed RGB values are decoded in
-polygon-corner order and invalid/missing color data is rejected before editing.
-The user's Maya 2025 smoke run reached color import after the normal-write,
-undo/redo, mask, transform, and JSON checks; the full smoke test still needs to
-be rerun on this version.
-
-## 0.1.1 normal-write correction
-
-XYZ assignment now uses a single absolute Maya command, which already freezes
-the normal. Redundant unlock/freeze commands were removed. Each operation reads
-back its normals and raises an explicit error on mismatch. Smoke assertions
-identify the failing stage and reject an old package loaded from another path.
-This change still requires a Maya rerun; it is not a confirmed runtime fix.
-Restart Maya before testing an updated package to avoid cached Python modules.
-To replace an installation at another path, use
-`install(new_root, replace_existing=True)` through the installer dictionary;
-the previous module file is backed up first.
-
-## Installation
-
-[Download AbnormalMaya-0.2.1.zip](releases/AbnormalMaya-0.2.1.zip?raw=true).
-On GitHub, use the download button if the ZIP preview opens.
-
-1. Extract the distribution to a permanent location. Keep `install.py` and
-   the `AbnormalMaya` directory beside one another.
-2. In Maya's **Python** Script Editor run (substitute your actual path):
+1. Extract the ZIP to a permanent location. Close the old checklist/panel and
+   **restart Maya** so the previous Python modules and draw plugin unload.
+2. Drag `install.py` into a viewport, or use Maya's **Python** Script Editor:
 
    ```python
    import runpy
-   runpy.run_path(r"C:/tools/AbnormalMaya/install.py")["install"](
-       r"C:/tools/AbnormalMaya"
+   runpy.run_path(r"C:/tools/AbnormalMaya-0.9.0/install.py")["install"](
+       r"C:/tools/AbnormalMaya-0.9.0"
    )
    ```
 
-   Alternatively drag `install.py` into a Maya viewport. The installer writes
-   `AbnormalMaya.mod` in your Maya user modules directory, preserves a different
-   existing installation, and opens the panel without requiring a restart.
-3. For future launches, or a Python shelf button:
+   The installer writes a module entry to your Maya user `modules` directory.
+   Known single-line older Abnormal entries upgrade with a backup. Custom
+   entries require an explicit `replace_existing=True`; their contents are
+   backed up too. An already-loaded package from a different folder is rejected
+   with a restart message rather than silently running the old version.
+3. Launch later, or create a **Python** shelf button:
 
    ```python
    import abnormal_maya
    abnormal_maya.show()
    ```
 
-No pip installation, internet connection, NumPy, compiled plugin, or external
-service is needed. Use Maya's bundled Qt bindings: PySide2 on 2024/2025, PySide6
-on 2026+. Never install a replacement Qt binding into Maya.
+No pip packages, NumPy, compiled binaries, credentials or services are needed.
+The UI selects PySide2 or PySide6 based on Maya's actual Qt version. It never
+installs or replaces Maya's bundled Qt. For a temporary development launch,
+put `AbnormalMaya/scripts` on `sys.path` before importing the package.
 
-For a temporary development launch without installation:
+## Normal editing
+
+Select one editable polygon mesh and **Start session**. Native vertex, edge,
+face, and vertex-face component selection still works. Enable **Edit individual
+face-vertex normals** to edit corners independently; otherwise touching a vertex
+groups its incident corners. Object selection means all corners.
+
+Controls include view/world/object rotation, axis flatten/alignment, flip,
+reset, per-vertex or whole-selection averaging, iterative smoothing, normals
+from fully selected faces, inside/outside, explicit/automatic symmetry,
+active-to-selection copy, live-reference clipboard, binary/set/soft-selection
+masks, and JSON/signed-color storage. Smooth/Flat shading changes edge flags
+while preserving explicit normal directions; changed normals may need freezing.
+Session restore also restores the original smoothing flags.
+
+- **Finish** keeps changes and cleans up editing tools/overlays.
+- **Cancel session** restores session-start normal values, lock flags and edge
+  smoothing. It does not delete topology changes made outside the editor.
+- **Reset selected** restores selected normal values, respecting weights.
+- **Session undo/redo** restores normals, locks, edge flags, selection, active
+  corner, hidden state, weights and clipboard together. Native Maya selection
+  changes are captured before the next editor action.
+- Maya's global Undo/Redo still works for native editing commands. Use session
+  history when restoring filter/selection/display state. Do not alternate
+  arbitrary external geometry edits with local history and expect a DAG snapshot.
+
+Each normal editing action closes its native undo chunk even if a command
+fails. Earlier writes in a failed operation remain natively undoable. There is
+no long-lived undo chunk spanning the UI. Session history is bounded to 128
+states and reduces the limit for large meshes (minimum four), targeting roughly
+two million stored corner-normal entries. Complete immutable snapshots can
+still consume substantial memory. Native internal normal-sharing IDs are not
+promised to be byte-identical after restoring values/locks/edge state.
+
+## Direct corner selection and traversal
+
+Enable the custom overlay and click **Pick normals / corners**. This installs
+an event filter only on the active viewport; it does not replace a global Maya
+hotkey set. The overlay remains nonselectable to native Maya tools outside this
+picker. The selector operates on displayed line segments and triangular corner
+proxies, preserving split normals at shared vertices.
+
+Choose **Click**, **Box**, **Circle**, or **Lasso**. Dragging previews the result;
+release commits it. Escape cancels an unfinished region gesture. Circle mode
+paints along the stroke; its radius is in physical viewport pixels. Projection
+converts Qt logical coordinates to viewport pixels for HiDPI displays.
+
+- No modifier: replace selection.
+- Shift: add. Ctrl: subtract. Shift+Ctrl: toggle.
+- **X-ray** ignores occlusion. Otherwise rays test the edited source mesh,
+  including its evaluated geometry, with an intersection accelerator.
+- Hidden corners and points behind the camera are excluded. With selected-only
+  overlay enabled, undisplayed corners cannot be picked.
+- Alt, middle button and right button remain available for native navigation.
+  Alt navigation cancels an unfinished region gesture. Q exits the picker.
+
+The topology buttons use mesh connectivity, not spatial proximity:
+
+- **Linked** expands through connected visible vertices.
+- **Vertex path** requires exactly two endpoint vertices.
+- **Face path** requires corners on two endpoint faces (use individual mode).
+- **Edge loop** requires one native Maya edge; it continues through valence-four
+  vertices along edges not sharing adjacent faces, stopping at poles/boundaries.
+- **Face ring** requires one native edge and crosses opposite edges of quads,
+  stopping at non-quads and hidden faces.
+
+Equal shortest paths and ambiguous overlapping picks use deterministic Maya-ID
+ordering. Blender BMesh iteration can choose a different equally short path.
+Source edge-loop/ring results were compared against all edges of a quad-grid
+fixture; concave and non-manifold traversal still needs representative assets.
+
+## Interactive rotation rings and targets
+
+**Rotation rings** creates a temporary pivot at the selected-corner centroid
+and uses Maya's native rotate manipulator. The pivot basis follows Object,
+World or View mode. Normal vectors use the matrix delta from the initial pivot;
+previews are absolute relative to captured normals, not compounded each tick.
+
+**Live point target** and **Live sphere target** create a temporary locator at
+the target fields and use Maya's move manipulator. Object/View mode aligns the
+helper's local axes to the corresponding basis. World mode uses world axes.
+Move the locator to preview normals. Point can align all vectors from the
+selection centroid; sphere points away from the locator. Strength, masks,
+selected corners and symmetry settings are captured for the operation.
+
+**Confirm live tool** / Enter keeps the result. **Cancel live tool** / Escape
+restores the captured full state. Ctrl+Z in the live viewport cancels the pending
+preview rather than partially undoing its native commands. Closing the panel or
+switching editor tools cancels an unconfirmed manipulation. Q can leave the
+native manipulator, but an explicit Confirm/Cancel is still required.
+
+The helper and its context are removed on completion, including failed previews.
+Helpers are marked `doNotWrite` and do not serialize. No source vertices are
+moved. Source renames resolve through UUIDs. Other editor actions are blocked
+while a live manipulation is pending. Avoid external normal/topology edits
+until confirming/cancelling. Helper creation/deletion and preview commands remain in native undo history;
+native undo may temporarily restore a deleted nonsaving helper, as with normal
+Maya node deletion. This keeps transform undo commands valid rather than deleting
+their objects outside history. The confirmed result is a single step in
+**session** history; use that history for the editor workflow. A failed preview
+is cancelled when confirmed and reports its error.
+
+## Viewport feedback
+
+The optional Python Viewport 2.0 plugin supplies normal lines, vertex points,
+corner wedges, normal/selected/active colors, positive-weight colors, X-ray,
+selected-only display, length scaling, brightness, wedge size and mesh wireframe.
+Colors and normal-length factors follow the source's HSV definitions. Weight
+colors use 16 display bins; edit weights remain precise. Display lengths use
+world centimeters, regardless of Maya display units; point sizes use pixels.
+
+Hide selected/unselected and Reveal affect editor normals, **not mesh geometry**.
+Hidden corners are protected from selected-normal edits, smoothing, clipboard
+and mirrored destinations. Whole-mesh stored-data loads intentionally operate
+on the whole mesh. Visibility has its own compatibility undo buttons as well
+as unified session history. Native Maya normal display remains available as an
+alternative but cannot individually hide corner normals.
+
+The draw helper is a nonselectable, nonsaving shape below the source transform.
+It is removed on disable, Finish, Cancel and panel close. Display helper changes
+use scoped `stateWithoutFlush` to avoid splitting normal-edit history. Actual
+API selection lists are preserved; transform/shape string aliases can change.
+Render callback failures are recorded and reported by both UI and tests.
+Refresh intervals adapt upward from 200 ms to avoid continuously queuing work
+on slower/larger meshes. Disable the custom overlay for a lighter workflow.
+
+The plugin uses local prototype node ID `0x0007F7F0`. Obtain a registered Autodesk
+ID before studio-wide distribution. Node-ID collisions fail initialization.
+Helpers may mark the scene modified, despite being excluded from serialization.
+
+## Preferences and scoped shortcuts
+
+**Save preferences** persists validated controls using a Maya `optionVar`.
+**Reset controls** restores defaults without overwriting saved preferences until
+Save is clicked. Font scaling, selection mode/radius, axis/space, normal settings,
+overlay settings, strength, iterations and shortcut enablement persist. Session
+meshes, selections, weights, clipboard, helper nodes and active tools do not.
+Test-created panels do not automatically save preferences.
+
+Panel-only shortcuts: Ctrl+Alt+Z / Ctrl+Alt+Shift+Z for session undo/redo; Alt+P
+picker; Alt+R rotation rings; Alt+T point target; Alt+S sphere target. They use
+`WidgetWithChildrenShortcut` and do not modify user hotkey sets.
+
+While the viewport picker is active: B box, C circle, Shift+L lasso, L linked,
+A select all, H hide selected, Shift+H hide unselected, Alt+H/F reveal, [ / ]
+circle radius, Ctrl+Z / Ctrl+Shift+Z session history, Q exit. Non-cancel actions
+are deferred during a region drag. Disable scoped shortcuts in the panel to
+return ordinary key handling to Maya; Q/Escape still provide a safe tool exit.
+
+## Data and transform semantics
+
+Normals are stored per `(faceId, vertexId)` corner in object space. World/view
+normal transforms use inverse transpose and normalization; points use ordinary
+matrices. No automatic Blender Z-up conversion is applied to native Maya meshes.
+Targets are world-space centimeters. Zero/near-singular transforms are rejected.
+
+Smoothing matches the source's neighboring-corner average with an effective
+iteration factor of `0.5 * strength`; it can change unselected siblings of touched
+vertices, except hidden corners. It is not area-weighted or seam-preserving.
+Outside/inside use geometric face directions, not a closed-volume test. Point
+and sphere blend unnormalized displacements before normalization, retaining the
+source's distance-dependent strength. Degenerate results keep previous normals.
+The source's flat inside-sign and all-zero-mask omissions are corrected.
+
+Mirroring finds the nearest reflected vertex and matches corner tangents.
+Zero manual distance means unlimited nearest matching; automatic symmetry also
+uses unlimited matching. Concave/straight corner tangents now match actual
+`BMLoop.calc_tangent` fixtures. Clipboard source indices remain live and
+mesh-local. Equal candidates use deterministic ID ordering.
+
+Store/Load uses the mesh `abnormalNormals` JSON string attribute with topology
+signature. The color-set path uses signed, unclamped face-vertex RGB values,
+alpha one, also named `abnormalNormals`; no color-space conversion is applied.
+Persistent storage contains vectors, not locks/history. Invalid storage data
+is rejected before mesh edits.
+
+## Verification and performance
+
+Run in Maya's **Python** tab after restarting and extracting this package:
 
 ```python
-import sys
-sys.path.insert(0, r"C:/path/to/repository/maya/AbnormalMaya/scripts")
-import abnormal_maya
-abnormal_maya.show()
+import runpy
+report = runpy.run_path(r"C:/path/to/AbnormalMaya-0.9.0/tests/run_all_maya.py")["run"]()
 ```
 
-## Editing workflow
+The runner has 26 automated cases, including all previous behavior, normal-ID
+bulk capture ordering, grouped-command undo, full-state history, shading flags,
+projection/occlusion, picker lifecycle, preferences and shortcut scopes, live
+targets/rings, a representative construction-history/blendShape workflow, and
+a 10,000-corner timing case. It uses a temporary camera for occlusion testing
+and restores the previous viewport camera. Each case prints PASS/FAIL/SKIP and
+its traceback. Render tests require successful native draw callbacks.
 
-1. Select one polygon mesh or its components, then **Start session**.
-2. Select vertices, edges, faces, or vertex-faces with Maya's normal component
-   tools. Object selection means all corners. Maya native marquee, lasso,
-   paint selection, isolate select, and viewport navigation remain available.
-3. Leave **Edit individual face-vertex normals** off to group all corners at
-   each touched vertex; enable it to preserve a partial corner selection.
-4. Choose Object, World, or active View space and an axis. Rotate by increments
-   or choose **Drag to rotate in viewport** (horizontal drag, 0.5 degrees/pixel;
-   press Q to return to selection). Alignment, flatten, flip, averages,
-   smoothing, normals from fully selected faces, inside, and outside operate
-   through buttons. Explicit mirror and automatic symmetry always use mesh
-   object axes, independently of the editing-space setting.
-5. **Finish** keeps edits. **Cancel session** restores the session-start normal
-   values and lock flags. Closing the panel keeps edits. **Reset selected**
-   restores selected normals only and still respects the current weight mask.
-6. Maya Undo/Redo operate on global history. Each button operation is one undo
-   chunk; the native dragger groups a gesture using step undo mode. The gesture
-   grouping and exception behavior must be verified in Maya, not inferred from
-   the numerical tests. Leaving the drag tool keeps its latest edit. Escape
-   is not a separate session rollback; use Undo or Cancel session.
+Complete the 12 checks in the modeless manual window for actual mouse input,
+modifiers, HiDPI behavior, native navigation, live manipulation, history and
+preferences. Synthetic callback tests do not establish physical gesture behavior.
+Closing the checklist removes its own test geometry/panel.
 
-Do not change topology during a session. The tool checks face connectivity and
-vertex counts and rejects stale mappings. Deleted/replaced meshes and instances
-are rejected. Renaming/reparenting the session mesh is supported through UUID
-resolution. Symmetry maps rebuild after point positions change. The tool does
-not disable deformers or modify construction-history connections. For a
-predictable first workflow, use an editable non-instanced mesh with no incoming
-construction history; validate your specific deformation stack separately.
-
-## Features and precise behavior
-
-- **Normals, not geometry:** edits never move vertices or reverse polygons.
-  Updated normals are explicitly frozen; Maya's native commands own the undo
-  records for previous normal values/locks. Hard/soft edge settings are not
-  deliberately changed by the tool. Verify shared-normal assignments in Maya.
-- **Flatten:** remove the component along the chosen axis. Zero-length results
-  retain their original normal. Opposing averages also retain originals.
-- **Smooth:** like Abnormal, average all corner normals on neighboring vertices,
-  blend by `0.5 * strength` per iteration, and normalize afterward. This can
-  update unselected sibling corners at selected vertices. It is not an
-  area-weighted algorithm and does not automatically preserve hard seams.
-- **From faces:** only fully selected faces contribute. Their normals are
-  averaged per incident vertex. Individual mode restricts writes to those
-  face corners; grouped mode includes other corners at the same vertices.
-- **Inside/outside:** use geometric face normals, optionally averaged at a
-  vertex using the separate face-direction checkbox (independent of individual
-  corner selection). This changes direction calculation, not polygon shading. They do not detect closed-volume orientation. The source's flat-mode
-  inside-sign omission is corrected here.
-- **Mirror:** nearest reflected vertex plus matching geometric corner bisector;
-  no UV dependency. Zero manual distance means unlimited nearest matching,
-  matching the source. A positive distance limits manual matches. Auto mirror
-  uses unlimited matching. Use clean symmetric meshes; centerline and
-  overlapping-vertex ambiguities can require individual selection. Sequential
-  axis processing matches the source; it is not all combinations of axes.
-- **Clipboard:** select exactly one vertex or vertex-face and Store, then select
-  destinations and Paste. A vertex source matches corner bisectors by dot
-  product. Source corner references remain live, as in Abnormal. There is no
-  cross-mesh clipboard. Geometric bisectors approximate BMesh corner tangents;
-  verify concave/degenerate polygon correspondence.
-- **Masks:** selection gives binary weights; soft-selected vertices give Maya
-  rich-selection weights; a named component set gives binary membership.
-  Weights are session-local. Clear means unrestricted editing. An empty mask
-  protects everything, correcting the source's all-zero-mask behavior. Explicit
-  mirror and automatic mirrored destinations bypass masks as in source symmetry.
-  These masks are separate from Maya global selection undo.
-- **Point/sphere:** target fields are world-space centimeters, independent of
-  display units. Pick a locator/transform to sample its position, or set the
-  target at the selected-corner centroid. Targets are sampled, not live scene
-  connections. Point can align vectors from the selection centroid; sphere
-  points away from the target. Displacement vectors are blended before
-  normalization, retaining source distance-dependent strength behavior.
-- **Spaces:** normals use inverse-transpose transforms and are normalized;
-  targets use point transforms. Zero-scale transforms are rejected. No blanket
-  Z-up to Y-up conversion is applied to native Maya meshes.
-- **Persistent data:** Store/Load writes whole-mesh object-space vectors to the
-  mesh's `abnormalNormals` JSON string attribute, including a topology signature.
-  It survives scene saving. It stores normals, not weights or lock states.
-- **Colors:** the `abnormalNormals` face-vertex color set stores signed XYZ
-  directly, alpha 1, without clamping. This is data, not display color; do not
-  apply color-space conversion. Negative values require an unclamped color set.
-- **Display:** the panel toggles Maya's native face-vertex normal display and
-  its size. Display changes are normal Maya undoable settings and are retained.
-
-## What is not a one-to-one port yet
-
-This release still uses Maya native component selection. Custom overlay wedges
-are display-only; picking them directly is the next selection-context milestone.
-Custom rotation-ring gizmos, Blender shortest-path/loop selection heuristics,
-in-viewport floating panels, unified selection/normal/filter session history,
-preferences/hotkeys, and fully live target movement remain to be ported. It has
-no custom DG history node or compiled acceleration. Qt controls replace the
-Blender widget framework; display geometry and styles are adapted to VP2.
-
-Native per-corner commands prioritize Maya-managed undo over speed; very large
-meshes and continuous drags can be slow and create substantial history. A
-profiled API command with exact normal-assignment restoration is a future
-optimization, not a requirement to install this script package. If a Maya
-command fails halfway through, previous writes remain in a closed undo chunk;
-use Maya Undo to revert them. Cancel restores values/locks, not necessarily
-original internal normal-sharing IDs. Test on a copy of an asset first.
-
-## Validation
+Tests do not reset or save your scene. They restore selection, current tool,
+soft-selection settings and the preference variable. They add global undo-history
+entries. Run in an idle scene, with no active picker/live tool. An optional
+`report_path` writes JSON; otherwise results are printed and returned. Use
+`run(manual=False)` to omit the interactive checklist.
 
 Outside Maya, from the repository root:
 
 ```sh
 python3 -m unittest discover -s maya/tests -v
 python3 -m compileall -q maya/AbnormalMaya/scripts maya/tests maya/install.py
-```
-
-Inside Maya, after installation (creates and removes its own test cube; does
-not reset or save the current scene):
-
-```python
-import runpy
-runpy.run_path(r"C:/path/to/repository/maya/tests/maya_smoke.py")["run"]()
-```
-
-Or in Maya's Python interpreter, when available:
-
-```sh
-mayapy /path/to/repository/maya/tests/maya_smoke.py
-```
-
-The integration smoke checks corner isolation, native undo/redo and locks,
-zero masks, nonuniform transforms, JSON/color round trips, session restoration,
-and topology guards. It must print `PASS` and exit without an exception.
-
-Manual GUI checks: launch and close/reopen docking; edit one cube face-corner;
-undo/redo; drag rotation in object/world/view; try a soft-selection mask and
-manual symmetry; cancel; save and reload stored data. Check Maya 2024 and your
-newest supported release separately, including color storage and normal locks.
-Tests have not been run under Maya in the cloud environment.
-
-## Files
-
-- `display.py`: pure overlay geometry and visibility history.
-- `overlay.py`: source tracking and immutable viewport payloads.
-- `abnormal_maya_vp2.py`: optional Python Viewport 2.0 draw plugin.
-- `tests/test_display.py`: display/visibility regression tests.
-
-- `AbnormalMaya/scripts/abnormal_maya/core.py`: host-independent algorithms.
-- `scene.py`: Maya selection, transforms, native undoable writes, storage.
-- `ui.py`: Qt dockable panel and native selection/display controls.
-- `tools.py`: native viewport dragger rotation context.
-- `install.py`: user module registration and immediate launch.
-- `tests/test_core.py`: executable numerical regression tests.
-- `tests/maya_smoke.py`: actual Maya integration checks.
-
-MIT license and original attribution are included in `AbnormalMaya/LICENSE`.
-
-To build the distributable ZIP and SHA-256 file:
-
-```sh
+python3 maya/tests/profile_algorithms.py
 python3 maya/build.py
 ```
 
-The generated `maya/dist/AbnormalMaya-0.2.1.zip` excludes caches and preserves
-license attribution. It includes the standalone numerical and Maya integration
-tests. The repository additionally contains `tests/blender_parity.py`, which
-compares nine algorithms with the original source under Blender; those checks
-passed on Blender 4.3.2. They replace only mesh-write/UI/undo callbacks and do
-not establish Maya API or viewport compatibility.
+The repository-only `blender_parity.py` compares nine numerical operations,
+actual BMesh corner tangents and source loop/ring traversal under Blender.
+[PROFILE.json](PROFILE.json) records CPython CPU timings: for 10,000 vertices /
+39,204 corners, approximately 0.32 s mesh-cache construction, 0.43 s overlay
+geometry, 0.75 s for five smooth iterations and 0.05 s topology/path work on this
+machine. These are **not Maya or GPU timings**. Actual host timings are recorded
+by the integration runner. Bulk reads and grouping identical normal assignments
+reduce Maya command overhead; arbitrary unique normals can still require many
+native writes. No unverified custom API undo implementation replaces them.
 
-## Extended automated and guided GUI checks
+## Boundaries of the full-port candidate
 
-With the package installed, download `tests/run_all_maya.py` or the standalone
-[`AbnormalMaya-tests.zip`](releases/AbnormalMaya-tests.zip). In Maya's **Python**
-Script Editor:
+Qt controls and native Maya manipulators replace the Blender widget framework
+and gizmo rendering. This is functional translation, not pixel-identical UI.
+Tie-breaking, non-manifold traversal and modifier/deformer evaluation can differ
+between hosts. The tool does not mute or rewrite Maya's construction graph.
+Topology edits during a session invalidate mappings and are rejected; Finish
+still cleans up the session. Instances are rejected; make a mesh unique first.
 
-```python
-import runpy
-report = runpy.run_path(r"C:/path/to/run_all_maya.py")["run"]()
-```
+The 0.9.0 feature implementation is complete for the mapped workflows, but the
+new Maya runtime tests, difficult production assets and 2024/2026 host coverage
+remain necessary. Nothing in the local test results establishes those outcomes.
 
-This runner tests all operation adapters, normal undo/redo and locks,
-object/world/view space, nonuniform/negative transforms, symmetry, clipboard,
-weights and rich selection, signed colors/JSON, lifecycle guards, Qt docking,
-panel controls, normal display, and rotation callbacks. It continues after a
-failure and prints each case and traceback, followed by totals. Native pointer
-coordinates are simulated for the callback test; this does **not** prove real
-mouse dispatch or native gesture undo grouping.
-
-A modeless checklist then offers a test cube and panel for actual pointer
-rotation, per-gesture undo/redo, docking, and visual inspection. Mark each as
-PASS/FAIL and click Print complete report. Closing the checklist removes its
-own test geometry. Tests do not reset or save the scene, and restore selection,
-current tool, and soft-selection settings. Like any Maya command test, they add
-global undo-history entries; do not assume your prior undo queue is unchanged.
-Use an otherwise idle Maya session; finish any active normal-editing gesture
-before running. An existing rotation context is preserved; creation and callbacks are tested
-under a unique temporary context name instead.
-
-To skip the manual checklist: `run(manual=False)`. To save the automated report,
-pass `report_path=r"C:/path/to/report.json"`; the manual checklist prints its
-updated results separately. No report files are written by default.
-
-The 0.1.3 extended runner passed all 13 automated and three manual checks in
-the user's Maya 2025 session. The 0.2.0 overlay additions are syntax-checked
-and numerically tested, but their new Maya checks still need to run.
+MIT license and original attribution are included in `AbnormalMaya/LICENSE`.

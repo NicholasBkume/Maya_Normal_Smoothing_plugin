@@ -3,11 +3,11 @@ import math
 from maya import cmds
 from maya.api import OpenMaya as om
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
-try:
-    from PySide6 import QtWidgets, QtCore
-except ImportError:
-    from PySide2 import QtWidgets, QtCore
-from . import core, scene, tools, overlay
+if str(cmds.about(qtVersion=True)).startswith('6'):
+    from PySide6 import QtWidgets, QtCore, QtGui
+else:
+    from PySide2 import QtWidgets, QtCore, QtGui
+from . import core, scene, tools, overlay, picking, preferences
 
 _PANEL = None
 
@@ -19,6 +19,7 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.setWindowTitle('Abnormal Maya — Normal Editor')
         self.setMinimumWidth(330)
         self.session = None
+        self.base_font=QtGui.QFont(self.font())
         self.overlay_controller = None
         self.overlay_timer = QtCore.QTimer(self)
         self.overlay_timer.timeout.connect(self.refresh_overlay)
@@ -44,6 +45,19 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
                   ('Reveal normals', self.reveal_normals)])
         self.row([('Visibility undo', lambda: self.visibility_history(False)),
                   ('Visibility redo', lambda: self.visibility_history(True))])
+        self.row([('Session undo',lambda:self.require().history_step(-1)),
+                  ('Session redo',lambda:self.require().history_step(1))])
+        self.selection_mode=QtWidgets.QComboBox()
+        self.selection_mode.addItems(['Click','Box','Circle','Lasso'])
+        self.form('Corner selection tool',self.selection_mode)
+        self.selection_radius=self.number(1,300,25,1)
+        self.form('Circle radius (viewport pixels)',self.selection_radius)
+        self.row([('Pick normals / corners',self.pick_tool)])
+        self.row([('Linked',lambda:self.topology('linked')),
+                  ('Vertex path',lambda:self.topology('vertex_path')),
+                  ('Face path',lambda:self.topology('face_path'))])
+        self.row([('Edge loop',lambda:self.topology('edge_loop')),
+                  ('Face ring',lambda:self.topology('face_ring'))])
         self.space = QtWidgets.QComboBox()
         self.space.addItems(['Object', 'World', 'View'])
         self.form('Editing space', self.space)
@@ -54,7 +68,8 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.form('Rotation degrees', self.angle)
         self.row([('Rotate −', lambda: self.edit('rotate', angle=-math.radians(self.angle.value()))),
                   ('Rotate +', lambda: self.edit('rotate', angle=math.radians(self.angle.value())))])
-        self.row([('Drag to rotate in viewport', self.rotate_tool)])
+        self.row([('Drag to rotate in viewport', self.rotate_tool),
+                  ('Rotation rings',lambda:tools.manipulate(self,'rotate'))])
         self.row([('Flatten', lambda: self.edit('flatten')),
                   ('Align +', lambda: self.edit('align')),
                   ('Align −', lambda: self.edit('align', axis=core.mul(self.axis_vector(), -1)))])
@@ -73,6 +88,8 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.smooth_directions = QtWidgets.QCheckBox('Inside/outside: average face directions per vertex')
         self.smooth_directions.setChecked(True)
         self.body_layout.addWidget(self.smooth_directions)
+        self.row([('Smooth shading',lambda:self.require().shading(True)),
+                  ('Flat shading',lambda:self.require().shading(False))])
         self.row([('Outside', lambda: self.edit('outside')), ('Inside', lambda: self.edit('inside'))])
         self.body_layout.addWidget(QtWidgets.QLabel('Symmetry (mesh object axes)'))
         auto_row = QtWidgets.QHBoxLayout()
@@ -87,6 +104,7 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.form('Manual mirror distance (object units; 0 = unlimited)', self.tolerance)
         self.row([('Mirror X', lambda: self.mirror(0)), ('Mirror Y', lambda: self.mirror(1)),
                   ('Mirror Z', lambda: self.mirror(2))])
+        self.row([('Active → selected',lambda:self.require().copy_active(self.individual.isChecked()))])
         self.row([('Store active source', self.store), ('Paste source normals', self.paste)])
         self.body_layout.addWidget(QtWidgets.QLabel('Weights (session-local)'))
         self.row([('Mask from selection', self.mask), ('Mask from soft selection', self.soft_mask),
@@ -104,6 +122,10 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.body_layout.addWidget(self.align_target)
         self.row([('Point toward target', lambda: self.edit('point')),
                   ('Sphereize from target', lambda: self.edit('sphere'))])
+        self.row([('Live point target',lambda:tools.manipulate(self,'point')),
+                  ('Live sphere target',lambda:tools.manipulate(self,'sphere'))])
+        self.row([('Confirm live tool',self.confirm_manipulation),
+                  ('Cancel live tool',self.cancel_manipulation)])
         self.body_layout.addWidget(QtWidgets.QLabel('Object-space normal storage (whole mesh)'))
         self.row([('Store on mesh', lambda: self.require().save_vectors()),
                   ('Load from mesh', lambda: self.require().load_vectors())])
@@ -133,7 +155,30 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.overlay_point_size.valueChanged.connect(lambda _: self.refresh_overlay())
         self.body_layout.addWidget(QtWidgets.QLabel('Finish keeps edits. Cancel restores session-start normals.\n'
                                               'Closing the panel keeps edits. Undo/Redo use Maya’s global history.'))
+        self.overlay_brightness=self.number(.1,3,1,2)
+        self.form('Overlay brightness',self.overlay_brightness)
+        self.overlay_wedge_scale=self.number(.01,.5,.18,2)
+        self.form('Corner wedge size',self.overlay_wedge_scale)
+        self.overlay_wireframe=QtWidgets.QCheckBox('Overlay mesh wireframe')
+        self.body_layout.addWidget(self.overlay_wireframe)
+        for widget in (self.overlay_brightness,self.overlay_wedge_scale):
+            widget.valueChanged.connect(lambda _:self.refresh_overlay())
+        self.overlay_wireframe.toggled.connect(lambda _:self.refresh_overlay())
+        self.ui_scale=self.number(.5,2,1,2)
+        self.form('Panel font scale',self.ui_scale)
+        self.ui_scale.valueChanged.connect(self.apply_ui_scale)
+        self.shortcuts_enabled=QtWidgets.QCheckBox('Enable panel and active-tool shortcuts')
+        self.shortcuts_enabled.setChecked(True)
+        self.body_layout.addWidget(self.shortcuts_enabled)
+        self.row([('Save preferences',self.save_preferences),('Reset controls',self.reset_preferences)])
+        self.body_layout.addWidget(QtWidgets.QLabel('Picker: Shift add, Ctrl subtract, Shift+Ctrl toggle; Alt navigates.\n'
+            'B box, C circle, Shift+L lasso, L linked, H hide, Shift+H isolate, Alt+H reveal.\n'
+            'Ctrl+Z / Ctrl+Shift+Z session history while picking; Q exits.\n'
+            'Live manipulator: Enter confirms, Escape cancels.'))
         self.body_layout.addStretch()
+        self.apply_preferences(preferences.load())
+        self.scoped_shortcuts=[]
+        self.setup_shortcuts()
 
     def row(self, buttons):
         layout = QtWidgets.QHBoxLayout()
@@ -156,9 +201,16 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         widget.setValue(default)
         return widget
 
-    def run(self, callback):
+    def run(self, callback,allow_manipulation=False):
         try:
+            live=tools._INTERACTION is not None and getattr(tools._INTERACTION,'is_manipulation',False)
+            if live and not allow_manipulation and getattr(callback,'__name__','') not in ('confirm_manipulation','cancel_manipulation','finish','cancel'):
+                raise ValueError('Confirm or cancel the active live manipulation first')
+            lifecycle=getattr(callback,'__name__','') in ('start','finish','cancel')
+            if self.session and not self.session.closed and not live and not lifecycle: self.session.record()
             callback()
+            live=tools._INTERACTION is not None and getattr(tools._INTERACTION,'is_manipulation',False)
+            if self.session and not self.session.closed and not live: self.session.record()
             if self.session and not self.session.closed:
                 self.status.setText('Editing ' + self.session.shape + (' — weight mask active' if self.session.weights is not None else ''))
         except Exception as exc:
@@ -204,6 +256,72 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
                              space=self.space.currentText(),
                              auto_mirror=[i for i, check in enumerate(self.auto) if check.isChecked()],
                              **defaults)
+
+    def pick_tool(self):
+        self.require()
+        self.display.setChecked(False)
+        if not self.overlay_enabled.isChecked(): self.overlay_enabled.setChecked(True)
+        if self.overlay_controller is None: raise RuntimeError('Custom overlay is required for corner picking')
+        tools.pick(self)
+
+    def topology(self,kind):
+        picking.topology_selection(self.require(),kind,self.individual.isChecked())
+        self.refresh_overlay()
+
+    def confirm_manipulation(self):
+        tools.finish_manipulation(True)
+        self.refresh_overlay()
+
+    def cancel_manipulation(self):
+        tools.finish_manipulation(False)
+        self.refresh_overlay()
+
+    def preference_values(self):
+        values={}
+        for key in preferences.DEFAULTS:
+            widget=getattr(self,key)
+            if isinstance(widget,QtWidgets.QCheckBox): values[key]=widget.isChecked()
+            elif isinstance(widget,QtWidgets.QComboBox): values[key]=widget.currentText()
+            else: values[key]=widget.value()
+        return preferences.validate(values)
+
+    def apply_preferences(self,values):
+        for key,value in preferences.validate(values).items():
+            widget=getattr(self,key)
+            previous=widget.blockSignals(True)
+            try:
+                if isinstance(widget,QtWidgets.QCheckBox): widget.setChecked(value)
+                elif isinstance(widget,QtWidgets.QComboBox): widget.setCurrentText(value)
+                else: widget.setValue(value)
+            finally: widget.blockSignals(previous)
+        self.apply_ui_scale()
+        for shortcut in getattr(self,'scoped_shortcuts',[]): shortcut.setEnabled(self.shortcuts_enabled.isChecked())
+        self.refresh_overlay()
+
+    def apply_ui_scale(self,*args):
+        font=QtGui.QFont(self.base_font)
+        font.setPointSizeF(max(1,font.pointSizeF() if font.pointSizeF()>0 else 10)*self.ui_scale.value())
+        self.setFont(font)
+
+    def save_preferences(self):
+        preferences.save(self.preference_values())
+
+    def reset_preferences(self):
+        self.apply_preferences(preferences.DEFAULTS)
+
+    def setup_shortcuts(self):
+        shortcuts={'Ctrl+Alt+Z':lambda:self.require().history_step(-1),
+                   'Ctrl+Alt+Shift+Z':lambda:self.require().history_step(1),
+                   'Alt+P':self.pick_tool,'Alt+R':lambda:tools.manipulate(self,'rotate'),
+                   'Alt+T':lambda:tools.manipulate(self,'point'),'Alt+S':lambda:tools.manipulate(self,'sphere')}
+        shortcut_class=getattr(QtGui,'QShortcut',None) or QtWidgets.QShortcut
+        for key,callback in shortcuts.items():
+            shortcut=shortcut_class(QtGui.QKeySequence(key),self)
+            shortcut.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(lambda callback=callback:self.run(callback))
+            shortcut.setEnabled(self.shortcuts_enabled.isChecked())
+            self.scoped_shortcuts.append(shortcut)
+        self.shortcuts_enabled.toggled.connect(lambda enabled:[s.setEnabled(enabled) for s in self.scoped_shortcuts])
 
     def rotate_tool(self):
         tools.rotate(self.require(), axis=self.axis_vector(), space=self.space.currentText(),
@@ -254,13 +372,12 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
     def select_all(self):
         session = self.require()
         mesh = session.current()
-        cmds.select([scene.component(session.shape, mesh, i) for i in range(len(mesh.normals))
-                     if i not in session.visibility.hidden], replace=True)
+        session.set_selection(set(range(len(mesh.normals)))-session.visibility.hidden)
 
     def invert(self):
         session = self.require()
         mesh, selected = session.select(self.individual.isChecked())
-        cmds.select([scene.component(session.shape, mesh, i) for i in range(len(mesh.normals)) if i not in selected and i not in session.visibility.hidden], replace=True)
+        session.set_selection(set(range(len(mesh.normals)))-selected-session.visibility.hidden)
 
     def draw_normals(self):
         shape = self.require().shape
@@ -275,7 +392,7 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
                 self.overlay_controller = overlay.Controller(self.require())
                 self.refresh_overlay()
                 if self.overlay_controller:
-                    self.overlay_timer.start(200)
+                    self.overlay_timer.start(max(200,int(self.overlay_controller.last_seconds*2000)))
             except Exception:
                 self.stop_overlay()
                 raise
@@ -290,13 +407,19 @@ class Panel(MayaQWidgetDockableMixin, QtWidgets.QWidget):
                 scale_selected=self.overlay_scale_selected.isChecked(),
                 draw_weights=self.overlay_weights.isChecked(),
                 wedges=self.overlay_wedges.isChecked(),xray=self.overlay_xray.isChecked(),
-                point_size=self.overlay_point_size.value())
+                point_size=self.overlay_point_size.value(),brightness=self.overlay_brightness.value(),
+                wedge_scale=self.overlay_wedge_scale.value(),wireframe=self.overlay_wireframe.isChecked())
+            if self.overlay_timer.isActive():
+                self.overlay_timer.setInterval(max(200,int(self.overlay_controller.last_seconds*2000)))
         except Exception as exc:
             self.stop_overlay()
             self.status.setText('Overlay stopped: '+str(exc))
             cmds.warning('Abnormal overlay: '+str(exc))
 
     def stop_overlay(self, keep_checkbox=False):
+        interaction=tools._INTERACTION
+        if interaction is not None and getattr(interaction,'panel',None) is self and not getattr(interaction,'is_manipulation',False):
+            tools.stop()
         self.overlay_timer.stop()
         if self.overlay_controller is not None:
             self.overlay_controller.close()

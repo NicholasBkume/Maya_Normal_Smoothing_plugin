@@ -29,7 +29,10 @@ Documentation, tips and tricks: https://bnpr.gitbook.io/abnormal-wiki/
 
 ## Maya version
 
-A Maya 2024+ / Python 3 implementation is available in [`maya/`](maya/README.md).
-It includes a dockable panel, undoable face-vertex normal editing, symmetry,
-weights, target tools, and normal storage. See that guide for installation,
-validation status, and remaining differences from the Blender add-on.
+The Maya 2024+ / Python 3 port is in [`maya/`](maya/README.md).
+[Download the 0.9.0 full-feature candidate](maya/releases/AbnormalMaya-0.9.0.zip?raw=true).
+It includes corner/region picking, topology selection, live target and rotation
+manipulators, unified history, saved preferences, scoped shortcuts and VP2 drawing.
+The previous 0.2.1 version passed its Maya 2025 suite; new 0.9.0 host validation
+is pending. See the [port matrix](maya/PORT_STATUS.md) before making compatibility
+or production-readiness claims.

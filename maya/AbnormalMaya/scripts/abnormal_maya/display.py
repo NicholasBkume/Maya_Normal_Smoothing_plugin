@@ -56,7 +56,7 @@ class Visibility:
 
 def batches(mesh, selected=(), active=(), hidden=(), weights=None, size=.4,
             selected_only=False, scale_selected=True, draw_weights=False,
-            wedges=False, wedge_scale=.18, points=True):
+            wedges=False, wedge_scale=.18, points=True,brightness=1.0,wireframe=False):
     """Return colored primitive batches, retaining one record per corner.
 
     Weights are quantized into 16 display bins only; edit weights are untouched.
@@ -94,4 +94,9 @@ def batches(mesh, selected=(), active=(), hidden=(), weights=None, size=.4,
                         core.add(core.add(origin,core.mul(core.sub(following,origin),wedge_scale)),offset),
                         core.add(core.add(origin,core.mul(core.sub(previous,origin),wedge_scale)),offset)]
             output.setdefault(('triangles',tri_color), []).extend(triangle)
-    return tuple((kind,color,tuple(vertices)) for (kind,color),vertices in output.items())
+    if wireframe:
+        edges={tuple(sorted((a,b))) for face in mesh.faces for a,b in zip(face,face[1:]+face[:1])}
+        vertices=[mesh.points[v] for edge in sorted(edges) for v in edge]
+        output[('lines',(.18,.18,.18,1))]=vertices
+    return tuple((kind,tuple(v*brightness for v in color[:3])+(color[3],),tuple(vertices))
+                 for (kind,color),vertices in output.items())

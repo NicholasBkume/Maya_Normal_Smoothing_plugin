@@ -3,10 +3,11 @@ from contextlib import contextmanager
 import json
 import math
 import re
+from functools import wraps
 
 from maya import cmds
 from maya.api import OpenMaya as om
-from . import core, display
+from . import core, display, history
 
 
 @contextmanager
@@ -47,9 +48,13 @@ def capture(name):
     path = mesh_path(name)
     fn = om.MFnMesh(path)
     points = [_triple(p) for p in fn.getPoints(om.MSpace.kObject)]
-    faces = [list(fn.getPolygonVertices(i)) for i in range(fn.numPolygons)]
-    normals = [_triple(fn.getFaceVertexNormal(f, v, om.MSpace.kObject))
-               for f, vertices in enumerate(faces) for v in vertices]
+    counts,indices=fn.getVertices()
+    indices=list(indices);faces=[];offset=0
+    for count in counts:
+        faces.append(indices[offset:offset+count]);offset+=count
+    values=fn.getNormals(om.MSpace.kObject)
+    _,normal_ids=fn.getNormalIds()
+    normals=[_triple(values[i]) for i in normal_ids]
     face_normals = [_triple(fn.getPolygonNormal(f, om.MSpace.kObject))
                     for f in range(fn.numPolygons)]
     return core.Mesh(points, faces, normals, face_normals)
@@ -75,9 +80,13 @@ def selected_corners(shape, mesh, individual=True, items=None, allow_empty=False
     corners = explicit + ((cmds.ls(converted, long=True, flatten=True) or []) if converted else [])
     lookup = {(f, v): i for i, (f, v) in enumerate(zip(mesh.corner_faces, mesh.corner_vertices))}
     result = set()
+    resolved={}
     for component in corners:
         match = re.fullmatch(r'(.+)\.vtxFace\[(\d+)\]\[(\d+)\]', component)
-        if match and mesh_path(match[1]).fullPathName() == shape:
+        if match:
+            name=match[1]
+            if name not in resolved: resolved[name]=mesh_path(name).fullPathName()
+        if match and resolved[match[1]] == shape:
             vertex, face = int(match[2]), int(match[3])
             if (face, vertex) in lookup:
                 result.add(lookup[face, vertex])
@@ -101,18 +110,19 @@ def write_normals(shape, mesh, normals, lock_states=None):
     if len(normals) != len(mesh.normals):
         raise ValueError('Normal count does not match topology')
     for i, (old, new) in enumerate(zip(mesh.normals, normals)):
-        if not all(math.isfinite(v) for v in new) or core.dot(new, new) < core.EPSILON:
+        if len(new)!=3 or not all(math.isfinite(v) for v in new) or core.dot(new, new) < core.EPSILON:
             raise ValueError('Invalid normal at corner {}'.format(i))
-    for i, (old, new) in enumerate(zip(mesh.normals, normals)):
-        if lock_states is None and max(abs(a-b) for a, b in zip(old, new)) < 1e-7:
+    groups={}
+    unlock=[]
+    for i,(old,new) in enumerate(zip(mesh.normals,normals)):
+        if lock_states is None and max(abs(a-b) for a,b in zip(old,new))<1e-7:
             continue
-        item = component(shape, mesh, i)
-        # Maya documents that assigning XYZ also locks this corner normal.
-        # Extra unlock/freeze commands can recalculate automatic normals and
-        # complicate redo. Use one absolute assignment for an ordinary edit.
-        cmds.polyNormalPerVertex(item, normalXYZ=tuple(new), relative=False)
-        if lock_states is not None and not lock_states[i]:
-            cmds.polyNormalPerVertex(item, unFreezeNormal=True)
+        item=component(shape,mesh,i)
+        groups.setdefault(tuple(new),[]).append(item)
+        if lock_states is not None and not lock_states[i]: unlock.append(item)
+    for vector,items in groups.items():
+        cmds.polyNormalPerVertex(items,normalXYZ=vector,relative=False)
+    if unlock: cmds.polyNormalPerVertex(unlock,unFreezeNormal=True)
     actual = capture(shape).normals
     for i, (expected, observed) in enumerate(zip(normals, actual)):
         if max(abs(a-b) for a, b in zip(expected, observed)) > 2e-4:
@@ -150,6 +160,16 @@ def _normal(n, matrix):
     return _triple(om.MVector(*n).transformAsNormal(matrix).normal())
 
 
+def recorded(function):
+    @wraps(function)
+    def wrapped(self,*args,**kwargs):
+        self.record()
+        result=function(self,*args,**kwargs)
+        self.record()
+        return result
+    return wrapped
+
+
 class Session:
     def __init__(self, shape=None):
         shape = shape or selected_mesh()
@@ -160,12 +180,17 @@ class Session:
         fn = om.MFnMesh(path)
         _, ids = fn.getNormalIds()
         self.locks = [fn.isNormalLocked(i) for i in ids]
+        self.original_smoothing=tuple(fn.isEdgeSmooth(i) for i in range(fn.numEdges))
         self.weights = None
         self.visibility = display.Visibility(len(self.original.normals))
         self.clipboard = []
         self.mirrors = {}
         self.position_signature = tuple(self.original.points)
         self.closed = False
+        self.active_corner = None
+        self.preview_selection = None
+        self.history = history.History(limit=min(128,max(4,2000000//max(1,len(self.original.normals)))))
+        self.record()
 
     @property
     def shape(self):
@@ -194,8 +219,15 @@ class Session:
             raise ValueError('No visible selected normals. Reveal hidden normals or select others.')
         return mesh, selected
 
-    def apply(self, operation, individual=True, space='Object', auto_mirror=(), baseline=None, **options):
-        mesh, selected = self.select(individual)
+    def apply(self, operation, individual=True, space='Object', auto_mirror=(), baseline=None,
+              selected_override=None,record_history=True, **options):
+        if record_history: self.record()
+        if selected_override is None:
+            mesh, selected = self.select(individual)
+        else:
+            mesh=self.current()
+            selected=set(selected_override)-self.visibility.hidden
+            if not selected: raise ValueError('No visible normals to manipulate')
         source_normals = mesh.normals if baseline is None else baseline
         if len(source_normals) != len(mesh.normals):
             raise ValueError('Drag baseline topology no longer matches')
@@ -222,6 +254,99 @@ class Session:
             result[i] = mesh.normals[i]
         with undo_chunk('Abnormal ' + operation):
             write_normals(self.shape, mesh, result)
+        if record_history: self.record()
+
+    def snapshot(self):
+        mesh=self.current()
+        fn=om.MFnMesh(mesh_path(self.shape))
+        _,ids=fn.getNormalIds()
+        selected=(set(self.preview_selection) if self.preview_selection is not None else
+                  set(selected_corners(self.shape,mesh,allow_empty=True)))-self.visibility.hidden
+        return dict(normals=tuple(tuple(n) for n in mesh.normals),
+                    locks=tuple(fn.isNormalLocked(i) for i in ids),
+                    smoothing=tuple(fn.isEdgeSmooth(i) for i in range(fn.numEdges)),
+                    selected=tuple(sorted(selected)),
+                    active=self.active_corner if self.active_corner in selected else None,hidden=tuple(sorted(self.visibility.hidden)),
+                    weights=None if self.weights is None else dict(self.weights),
+                    clipboard=tuple(self.clipboard))
+
+    def record(self):
+        self.history.push(self.snapshot())
+
+    def restore_snapshot(self,state):
+        mesh=self.current()
+        with undo_chunk('Abnormal session state'):
+            self._set_smoothing(state['smoothing'])
+            mesh=self.current()
+            write_normals(self.shape,mesh,state['normals'],state['locks'])
+        self.visibility._set(state['hidden'])
+        self.weights=None if state['weights'] is None else dict(state['weights'])
+        self.clipboard=list(state['clipboard'])
+        self.active_corner=state['active']
+        self._set_selection(state['selected'])
+
+    def history_step(self,direction):
+        if direction not in (-1,1): raise ValueError('History direction must be -1 or +1')
+        position=self.history.position
+        state=self.history.move(direction,self.snapshot())
+        if state is not None:
+            try: self.restore_snapshot(state)
+            except Exception:
+                self.history.position=position
+                raise
+
+    def _set_selection(self,indices):
+        mesh=self.current()
+        indices=set(indices)-self.visibility.hidden
+        if not indices.issubset(range(len(mesh.normals))):
+            raise ValueError('Selection contains stale corner indices')
+        items=[component(self.shape,mesh,i) for i in sorted(indices)]
+        cmds.select(items,replace=True) if items else cmds.select(clear=True)
+
+    def set_selection(self,indices,active=None):
+        self.record()
+        self._set_selection(indices)
+        self.active_corner=active if active in set(indices) else None
+        self.record()
+
+    def write_result(self,normals,record_history=True):
+        if record_history: self.record()
+        mesh=self.current()
+        result=list(normals)
+        for i in self.visibility.hidden: result[i]=mesh.normals[i]
+        with undo_chunk('Abnormal manipulation'):
+            write_normals(self.shape,mesh,result)
+        if record_history: self.record()
+
+    def _set_smoothing(self,flags):
+        fn=om.MFnMesh(mesh_path(self.shape))
+        if len(flags)!=fn.numEdges: raise ValueError('Edge smoothing topology changed')
+        groups={False:[],True:[]}
+        for i,smooth in enumerate(flags):
+            if fn.isEdgeSmooth(i)!=bool(smooth): groups[bool(smooth)].append(self.shape+'.e[{}]'.format(i))
+        for smooth,items in groups.items():
+            if items: cmds.polySoftEdge(items,angle=180 if smooth else 0,constructionHistory=False)
+
+    @recorded
+    def shading(self,smooth):
+        mesh=self.current()
+        fn=om.MFnMesh(mesh_path(self.shape))
+        with undo_chunk('Abnormal shading'):
+            self._set_smoothing([smooth]*fn.numEdges)
+            # Retaining explicit corner directions after softening requires
+            # freezing changed normals; unlocking them would recompute averages.
+            write_normals(self.shape,self.current(),mesh.normals)
+
+    @recorded
+    def copy_active(self,individual=True):
+        mesh,selected=self.select(individual)
+        if self.active_corner is None: raise ValueError('Pick an active normal/corner first')
+        source=[self.active_corner] if individual else mesh.vertex_corners[mesh.corner_vertices[self.active_corner]]
+        result=core.paste(mesh,selected,source)
+        result=core.blend(mesh.normals,result,selected,self.weights)
+        for i in self.visibility.hidden: result[i]=mesh.normals[i]
+        with undo_chunk('Abnormal active to selection'):
+            write_normals(self.shape,mesh,result)
 
     def _mirror_map(self, mesh, axis, tolerance=None):
         key = (axis, tolerance)
@@ -229,6 +354,7 @@ class Session:
             self.mirrors[key] = core.mirror_map(mesh, axis, tolerance)
         return self.mirrors[key]
 
+    @recorded
     def mirror(self, axis, individual=True, tolerance=None):
         mesh, selected = self.select(individual)
         mapping = self._mirror_map(mesh, axis, tolerance)
@@ -241,6 +367,7 @@ class Session:
         with undo_chunk('Abnormal mirror'):
             write_normals(self.shape, mesh, result)
 
+    @recorded
     def store(self, individual=True):
         mesh, selected = self.select(individual)
         items = cmds.ls(selection=True, long=True, flatten=True) or []
@@ -259,6 +386,7 @@ class Session:
             source = list(mesh.vertex_corners[vertex])
         self.clipboard = source
 
+    @recorded
     def paste(self, individual=True):
         mesh, selected = self.select(individual)
         result = core.paste(mesh, selected, self.clipboard)
@@ -268,14 +396,17 @@ class Session:
         with undo_chunk('Abnormal paste'):
             write_normals(self.shape, mesh, result)
 
+    @recorded
     def hide(self, individual=True, unselected=False):
         _, selected = self.select(individual)
         self.visibility.hide(selected, unselected=unselected)
 
+    @recorded
     def mask_selection(self, individual=True):
         _, selected = self.select(individual)
         self.weights = {i: 1.0 for i in selected}
 
+    @recorded
     def mask_set(self, name, individual=True):
         mesh = self.current()
         if not name or not cmds.objExists(name) or cmds.nodeType(name) != 'objectSet':
@@ -288,6 +419,7 @@ class Session:
                                    items=items, allow_empty=True)
         self.weights = {i: 1.0 for i in corners}
 
+    @recorded
     def mask_soft_selection(self):
         mesh = self.current()
         rich = om.MGlobal.getRichSelection()
@@ -310,7 +442,8 @@ class Session:
     def restore(self):
         mesh = self.current()
         with undo_chunk('Abnormal cancel session'):
-            write_normals(self.shape, mesh, self.original.normals, self.locks)
+            self._set_smoothing(self.original_smoothing)
+            write_normals(self.shape,self.current(),self.original.normals,self.locks)
         self.closed = True
 
     def save_vectors(self):
@@ -323,6 +456,7 @@ class Session:
                 cmds.addAttr(self.shape, longName='abnormalNormals', dataType='string')
             cmds.setAttr(plug, data, type='string')
 
+    @recorded
     def load_vectors(self):
         mesh = self.current()
         plug = self.shape + '.abnormalNormals'
@@ -338,6 +472,7 @@ class Session:
         with undo_chunk('Abnormal load vectors'):
             write_normals(self.shape, mesh, result)
 
+    @recorded
     def colors(self, export=True, color_set='abnormalNormals'):
         mesh = self.current()
         fn = om.MFnMesh(mesh_path(self.shape))

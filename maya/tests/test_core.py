@@ -141,6 +141,12 @@ class NormalTests(unittest.TestCase):
         self.assertFalse(core.degenerate_basis([(-2,0,0),(0,1,0),(0,0,3)]))
         self.assertFalse(core.degenerate_basis([(0,-2,0),(1,0,0),(0,0,3)]))
 
+    def test_corner_tangent_collinear_and_concave_cases(self):
+        self.assertVector(core.corner_tangent((1,0,0),(0,0,0),(2,0,0),(0,0,1)),(0,1,0))
+        tangent=core.corner_tangent((1,1,0),(2,0,0),(2,2,0),(0,0,1))
+        self.assertVector(tangent,(-1,0,0))
+        self.assertEqual(core.corner_tangent((0,0,0),(0,0,0),(0,0,0),(0,0,1)),(0,0,0))
+
     def test_reset(self):
         mesh = fixture()
         result = core.edit(mesh, {0}, 'reset', reference=[(1,0,0)]*6)

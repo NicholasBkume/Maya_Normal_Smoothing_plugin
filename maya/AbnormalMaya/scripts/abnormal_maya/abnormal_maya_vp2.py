@@ -109,7 +109,7 @@ class OverlayDraw(omr.MPxDrawOverride):
 
 
 def initializePlugin(obj):
-    plugin = om.MFnPlugin(obj,'Abnormal Maya contributors','0.2.1','Any')
+    plugin = om.MFnPlugin(obj,'Abnormal Maya contributors','0.9.0','Any')
     plugin.registerNode(overlay.NODE_TYPE,TYPE_ID,OverlayNode.creator,OverlayNode.initialize,
                         om.MPxNode.kLocatorNode,CLASSIFICATION)
     try:

@@ -6,6 +6,7 @@ It never copies over existing installation files without an explicit match.
 """
 from pathlib import Path
 import sys
+import re
 
 
 def install(root, replace_existing=False):
@@ -14,14 +15,19 @@ def install(root, replace_existing=False):
     package = root / 'AbnormalMaya'
     if not (package / 'scripts' / 'abnormal_maya' / '__init__.py').is_file():
         raise ValueError('Choose the maya distribution directory containing AbnormalMaya')
+    loaded=sys.modules.get('abnormal_maya')
+    if loaded and Path(loaded.__file__).resolve().parent != package/'scripts'/'abnormal_maya':
+        raise RuntimeError('An older Abnormal Maya is loaded. Restart Maya before installing this update.')
     modules = Path(cmds.internalVar(userAppDir=True)) / 'modules'
     modules.mkdir(parents=True, exist_ok=True)
     destination = modules / 'AbnormalMaya.mod'
-    content = '+ AbnormalMaya 0.2.1 {}\n'.format(package.as_posix())
+    content = '+ AbnormalMaya 0.9.0 {}\n'.format(package.as_posix())
     if destination.exists() and destination.read_text(encoding='utf-8') != content:
         existing = destination.read_text(encoding='utf-8')
         same_location = existing.strip().startswith('+ AbnormalMaya ') and existing.strip().endswith(' ' + package.as_posix()) and len(existing.splitlines()) == 1
-        if not same_location and not replace_existing:
+        generated=re.fullmatch(r'\+ AbnormalMaya (\d+)\.(\d+)\.(\d+) ([^\r\n]+)\n?',existing)
+        supported_upgrade=bool(generated and tuple(map(int,generated.groups()[:3])) <= (0,9,0))
+        if not same_location and not supported_upgrade and not replace_existing:
             raise RuntimeError('An AbnormalMaya.mod already exists at {}. To upgrade deliberately, call install(root, replace_existing=True); the old file will be backed up.'.format(destination))
         from datetime import datetime
         backup = destination.with_name('AbnormalMaya.mod.backup-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))

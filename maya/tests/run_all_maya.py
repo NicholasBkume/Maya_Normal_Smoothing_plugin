@@ -15,6 +15,7 @@ import math
 from pathlib import Path
 import sys
 import traceback
+import time
 import uuid
 from unittest import mock
 
@@ -43,11 +44,13 @@ def run(manual=True, report_path=None):
     from abnormal_maya import core, scene, tools
     if candidate and candidate.is_dir() and candidate not in Path(scene.__file__).resolve().parents:
         raise RuntimeError('An older Abnormal Maya is cached. Restart Maya and run this file again. Loaded: ' + scene.__file__)
-    if not hasattr(scene.Session, 'hide'):
-        raise RuntimeError('This updated runner requires Abnormal Maya 0.2.0. Download the new package and restart Maya.')
+    if not hasattr(scene.Session, 'history_step'):
+        raise RuntimeError('This runner requires Abnormal Maya 0.9.0. Download the new package and restart Maya.')
     from abnormal_maya import overlay
     if not cmds.undoInfo(query=True, state=True):
         raise RuntimeError('Enable Maya undo before running these tests')
+    if tools._INTERACTION is not None:
+        raise RuntimeError('Exit corner picking or confirm/cancel the live tool before running tests')
     if tools._TOOL is not None and cmds.currentCtx() == tools._CONTEXT:
         raise RuntimeError('Exit the Abnormal rotation tool with Q before running tests')
     previous_selection = cmds.ls(selection=True, long=True) or []
@@ -452,6 +455,220 @@ def run(manual=True, report_path=None):
               'Finish left a display controller/timer running')
         check(not cmds.objExists(node) and key not in overlay.PAYLOADS,'Finish leaked overlay helper data')
 
+    @case('Bulk normal capture order and grouped native assignment undo')
+    def grouped_writes():
+        _,shape,session,mesh=fixture()
+        fn=om.MFnMesh(scene.mesh_path(shape))
+        reference=[scene._triple(fn.getFaceVertexNormal(f,v,om.MSpace.kObject))
+                   for f,vertices in enumerate(mesh.faces) for v in vertices]
+        vectors(mesh.normals,reference,'bulk normal ID ordering')
+        cmds.select(shape,replace=True)
+        native=cmds.polyNormalPerVertex
+        with mock.patch.object(cmds,'polyNormalPerVertex',wraps=native) as calls:
+            session.apply('align',axis=(1,2,3))
+        check(calls.call_count==1,'Constant-vector alignment should use one native assignment, got '+str(calls.call_count))
+        expected=[core.unit((1,2,3))]*len(mesh.normals)
+        vectors(session.current().normals,expected,'grouped align')
+        cmds.undo()
+        vectors(session.current().normals,mesh.normals,'grouped align undo')
+
+    @case('Unified session history: selection, active, masks, visibility and normals')
+    def session_history():
+        _,shape,session,mesh=fixture()
+        session.set_selection({0,1},active=0)
+        session.weights={0:1.0};session.record()
+        initial=session.snapshot()
+        session.apply('flip')
+        changed=session.snapshot()
+        session.history_step(-1)
+        check(session.snapshot()==initial,'Session undo did not restore the complete state')
+        session.history_step(1)
+        check(session.snapshot()==changed,'Session redo did not restore the complete state')
+        session.hide(True)
+        hidden=session.snapshot()
+        session.history_step(-1)
+        check(session.snapshot()==changed,'Session hide undo mismatch')
+        session.history_step(1)
+        check(session.snapshot()==hidden,'Session hide redo mismatch')
+        session.visibility.reveal();session.weights=None
+        session.set_selection({0,1},active=0)
+        session.copy_active(True)
+        result=session.current()
+        vectors([result.normals[1]],[result.normals[0]],'active to selection')
+
+    @case('Native edge shading state and normal-preserving session restore')
+    def shading_state():
+        _,shape,session,mesh=fixture()
+        session.shading(True)
+        fn=om.MFnMesh(scene.mesh_path(shape))
+        check(all(fn.isEdgeSmooth(i) for i in range(fn.numEdges)),'Smooth edge flags missing')
+        vectors(session.current().normals,mesh.normals,'Shading changed explicit vectors')
+        session.restore()
+        fn=om.MFnMesh(scene.mesh_path(shape))
+        check(tuple(fn.isEdgeSmooth(i) for i in range(fn.numEdges))==session.original_smoothing,
+              'Cancel did not restore edge flags')
+
+    @case('Direct projection, occlusion and topology selection adapters')
+    def picking_adapters():
+        if cmds.about(batch=True): raise Skip('Requires a viewport camera')
+        from abnormal_maya import picking,selection
+        _,shape,session,mesh=fixture()
+        from maya.api import OpenMayaUI as omui
+        view=omui.M3dView.active3dView();original_camera=view.getCamera()
+        camera=cmds.camera(name='abnormalProjectionCamera_'+suffix)[0]
+        camera=cmds.parent(camera,root)[0]
+        cmds.setAttr(camera+'.translateZ',5)
+        camera_shape=cmds.listRelatives(camera,shapes=True,fullPath=True)[0]
+        camera_selection=om.MSelectionList();camera_selection.add(camera_shape)
+        try:
+            view.setCamera(camera_selection.getDagPath(0));cmds.refresh(force=True)
+            all_markers=picking.project(session,xray=True,view=view)
+            visible=picking.project(session,xray=False,view=view)
+            check(bool(all_markers),'No projected corners in the controlled test camera')
+            check(set(visible)<=set(all_markers),'Occlusion added invisible candidates')
+            check(0<len(visible)<len(all_markers),'Occlusion did not distinguish front and back cube corners')
+            for index in all_markers:
+                check(len(all_markers[index][2])==3,'Corner wedge projection is not triangular')
+        finally:
+            view.setCamera(original_camera)
+        session.set_selection({0})
+        picking.topology_selection(session,'linked',True)
+        check(scene.selected_corners(shape,mesh)==set(range(len(mesh.normals))),'Linked selection missed connected cube corners')
+        cmds.select([shape+'.vtx[0]',shape+'.vtx[6]'],replace=True)
+        picking.topology_selection(session,'vertex_path',False)
+        chosen=scene.selected_corners(shape,mesh)
+        graph=selection.Topology(mesh)
+        path=graph.path(0,6)
+        check(chosen=={i for v in path for i in mesh.vertex_corners[v]},'Vertex path adapter mismatch')
+
+    @case('Picker installation, scoped key events and teardown')
+    def picker_lifecycle():
+        _,shape,session,mesh=fixture()
+        panel=new_panel();panel.start();panel.individual.setChecked(True)
+        panel.pick_tool()
+        try:
+            check(tools._INTERACTION is not None,'Picker filter was not installed')
+            from abnormal_maya import ui
+            event=ui.QtGui.QKeyEvent(ui.QtCore.QEvent.KeyPress,ui.QtCore.Qt.Key_B,ui.QtCore.Qt.NoModifier)
+            check(tools._INTERACTION.event(event),'Picker did not handle its scoped B shortcut')
+            check(panel.selection_mode.currentText()=='Box','Picker shortcut did not switch selection mode')
+            panel.shortcuts_enabled.setChecked(False)
+            check(not tools._INTERACTION.event(event),'Disabled shortcuts still captured B')
+        finally: tools.stop()
+        check(tools._INTERACTION is None,'Picker teardown retained an event filter')
+
+    @case('Preferences round trip, native Qt binding and shortcut scope')
+    def saved_preferences():
+        from abnormal_maya import preferences,ui
+        existed=cmds.optionVar(exists=preferences.KEY)
+        old=cmds.optionVar(query=preferences.KEY) if existed else None
+        try:
+            panel=new_panel()
+            panel.selection_mode.setCurrentText('Lasso')
+            panel.selection_radius.setValue(37)
+            panel.save_preferences()
+            values=preferences.load()
+            check(values['selection_mode']=='Lasso' and values['selection_radius']==37,'Saved preferences mismatch')
+            check(ui.QtCore.qVersion().split('.')[0]==str(cmds.about(qtVersion=True)).split('.')[0],
+                  'Qt binding differs from the Maya host')
+            check(all(s.context()==ui.QtCore.Qt.WidgetWithChildrenShortcut for s in panel.scoped_shortcuts),
+                  'A shortcut escaped the panel scope')
+            panel.shortcuts_enabled.setChecked(False)
+            check(all(not s.isEnabled() for s in panel.scoped_shortcuts),'Shortcut disable failed')
+        finally:
+            if existed: cmds.optionVar(stringValue=(preferences.KEY,old))
+            elif cmds.optionVar(exists=preferences.KEY): cmds.optionVar(remove=preferences.KEY)
+
+    @case('Live point/sphere targets: preview, cancel, confirm and helper cleanup')
+    def live_targets():
+        if cmds.about(batch=True): raise Skip('Requires native manipulators')
+        for mode in ('point','sphere'):
+            _,shape,session,mesh=fixture()
+            panel=new_panel();panel.start();panel.individual.setChecked(True)
+            panel.space.setCurrentText('Object');panel.strength.setValue(1)
+            for w,v in zip(panel.target,(2,3,4)): w.setValue(v)
+            before=panel.require().snapshot()
+            live=tools.manipulate(panel,mode)
+            try:
+                check(live.error is None,'Live initialization failed: '+str(live.error))
+                fn=om.MFnTransform(live.path)
+                fn.setTranslation(om.MVector(3,4,5),om.MSpace.kWorld)
+                live.tick()
+                check(live.error is None,'Live preview failed: '+str(live.error))
+                expected=core.edit(mesh,{0},mode,target=(3,4,5),strength=1)
+                vectors(panel.require().current().normals,expected,mode+' live preview')
+                driver=live.driver
+                tools.finish_manipulation(False)
+                check(not cmds.objExists(driver),'Cancel leaked live target')
+                check(panel.require().snapshot()==before,'Cancel did not restore full state')
+                live=tools.manipulate(panel,mode);driver=live.driver
+                fn=om.MFnTransform(live.path);fn.setTranslation(om.MVector(5,4,3),om.MSpace.kWorld);live.tick()
+                tools.finish_manipulation(True)
+                expected=core.edit(mesh,{0},mode,target=(5,4,3),strength=1)
+                vectors(panel.require().current().normals,expected,mode+' confirm')
+                check(not cmds.objExists(driver),'Confirm leaked live target')
+            finally: tools.stop()
+
+    @case('Native rotation rings: quaternion preview and full-state cancel')
+    def rotation_rings():
+        if cmds.about(batch=True): raise Skip('Requires native manipulators')
+        _,shape,session,mesh=fixture()
+        panel=new_panel();panel.start();panel.individual.setChecked(True);panel.space.setCurrentText('World')
+        before=panel.require().snapshot()
+        live=tools.manipulate(panel,'rotate')
+        try:
+            quaternion=om.MQuaternion(math.radians(30),om.MVector(1,0,0))
+            om.MFnTransform(live.path).setRotation(quaternion,om.MSpace.kTransform)
+            live.tick()
+            check(live.error is None,'Rotation-ring preview failed: '+str(live.error))
+            expected=core.edit(mesh,{0},'rotate',axis=(1,0,0),angle=math.radians(30))
+            vectors(panel.require().current().normals,expected,'Native ring preview')
+            tools.finish_manipulation(False)
+            check(panel.require().snapshot()==before,'Ring cancel did not restore state')
+        finally: tools.stop()
+
+    @case('Editable construction history and blendShape representative workflow')
+    def history_deformer():
+        cube=cmds.polyCube(name='abnormalHistory_'+suffix,constructionHistory=True)[0]
+        cube=cmds.parent(cube,root)[0]
+        target=cmds.duplicate(cube,name='abnormalBlendTarget_'+suffix)[0]
+        cmds.move(.2,0,0,target+'.vtx[0]',relative=True,objectSpace=True)
+        blend=cmds.blendShape(target,cube,name='abnormalBlend_'+suffix,frontOfChain=True)[0]
+        owned_sets.append(blend)
+        cmds.setAttr(blend+'.weight[0]',.5)
+        shape=scene.mesh_path(cube).fullPathName()
+        cmds.select(shape,replace=True)
+        session=scene.Session(shape);mesh=session.current();selected(shape,mesh,[0])
+        session.apply('flip')
+        expected=list(mesh.normals);expected[0]=core.mul(expected[0],-1)
+        vectors(session.current().normals,expected,'BlendShape normal edit')
+        vectors(session.current().points,mesh.points,'Normal edit moved deformed vertices')
+        check(abs(cmds.getAttr(blend+'.weight[0]')-.5)<1e-8,'Normal edit changed blendShape weight')
+        cmds.undo();vectors(session.current().normals,mesh.normals,'BlendShape normal undo')
+
+    @case('Representative 10,000-corner mesh: capture, grouped edit and overlay timing')
+    def larger_mesh():
+        plane=cmds.polyPlane(name='abnormalProfile_'+suffix,subdivisionsX=50,subdivisionsY=50,
+                            width=10,height=10,constructionHistory=False)[0]
+        plane=cmds.parent(plane,root)[0]
+        shape=scene.mesh_path(plane).fullPathName();cmds.select(shape,replace=True)
+        start=time.perf_counter();session=scene.Session(shape);capture_seconds=time.perf_counter()-start
+        original=session.current()
+        start=time.perf_counter();session.apply('align',axis=(1,2,3));edit_seconds=time.perf_counter()-start
+        vectors(session.current().normals,[core.unit((1,2,3))]*len(original.normals),'larger-mesh grouped normals')
+        overlay_seconds=None
+        if not cmds.about(batch=True):
+            controller=overlay.Controller(session)
+            try:
+                start=time.perf_counter();controller.update(wedges=True);overlay_seconds=time.perf_counter()-start
+                controller.check_render()
+            finally: controller.close()
+        metrics=dict(vertices=len(original.points),corners=len(original.normals),
+                     session_capture_seconds=capture_seconds,grouped_edit_seconds=edit_seconds,
+                     overlay_seconds=overlay_seconds)
+        print('MAYA PROFILE: '+json.dumps(metrics))
+        return metrics
+
     @case('Native rotate-context creation and callback math (synthetic pointer input)')
     def rotation_callbacks():
         if cmds.about(batch=True):
@@ -485,18 +702,22 @@ def run(manual=True, report_path=None):
         print('Adapter:', scene.__file__)
         print('Native command tests add undo-history entries; the scene is never reset or saved.')
         for name, callback in cases:
+            started=time.perf_counter()
             try:
-                callback()
+                metrics=callback()
                 item = dict(name=name, status='PASS')
+                if isinstance(metrics,dict): item['metrics']=metrics
             except Skip as exc:
                 item = dict(name=name, status='SKIP', detail=str(exc))
             except Exception as exc:
                 item = dict(name=name, status='FAIL', detail=str(exc), traceback=traceback.format_exc())
+            item['seconds']=round(time.perf_counter()-started,4)
             results.append(item)
             print('{}: {}{}'.format(item['status'], name, '\n'+item['detail'] if 'detail' in item else ''))
             if item['status'] == 'FAIL':
                 print(item['traceback'])
     finally:
+        tools.stop()
         if not preexisting_context:
             tools.stop()
             if cmds.draggerContext(tools._CONTEXT, exists=True):
@@ -526,8 +747,14 @@ def run(manual=True, report_path=None):
                      'Dock/undock and normal-line appearance are usable at your display scale',
                      'Custom VP2 overlay shows selection colors, wedges and positive mask-weight colors',
                      'Custom overlay X-ray and selected-only toggles visibly change the display',
-                     'Hide/reveal and visibility undo/redo affect normals without hiding mesh geometry']
-    report = dict(maya=cmds.about(version=True), package=abnormal_maya.__version__,
+                     'Hide/reveal and visibility undo/redo affect normals without hiding mesh geometry',
+                     'Picker click/box/circle/lasso and Shift/Ctrl modifiers select the intended corners on a HiDPI viewport',
+                     'Picker X-ray selects back-side corners; occlusion mode excludes them; Alt navigation remains native',
+                     'Native rotation rings preview normals; Confirm keeps them and Cancel restores the original state',
+                     'Live point/sphere targets follow native movement; Enter confirms and Escape cancels',
+                     'Session history restores normals, selection, active corner, weights and hidden state together',
+                     'Saved preferences reopen correctly; scoped shortcuts do not affect other Maya panels']
+    report = dict(maya=cmds.about(version=True),python=sys.version,qt=cmds.about(qtVersion=True), package=abnormal_maya.__version__,
                   adapter=scene.__file__, automated=results,
                   manual=[dict(name=name, status='PENDING') for name in manual_checks])
     print('\nAUTOMATED: {} passed, {} failed, {} skipped.'.format(
@@ -582,6 +809,10 @@ def _show_manual(report):
             button = QtWidgets.QPushButton('Prepare test cube and panel')
             button.clicked.connect(self.prepare)
             layout.addWidget(button)
+            scroll=QtWidgets.QScrollArea();scroll.setWidgetResizable(True)
+            choices=QtWidgets.QWidget();choices_layout=QtWidgets.QVBoxLayout(choices)
+            scroll.setWidget(choices);layout.addWidget(scroll)
+            self.resize(600,700)
             for item in report['manual']:
                 row = QtWidgets.QHBoxLayout()
                 label = QtWidgets.QLabel(item['name'])
@@ -591,7 +822,7 @@ def _show_manual(report):
                 choice.addItems(['PENDING', 'PASS', 'FAIL'])
                 choice.currentTextChanged.connect(lambda value, item=item: self.record(item,value))
                 row.addWidget(choice)
-                layout.addLayout(row)
+                choices_layout.addLayout(row)
             button = QtWidgets.QPushButton('Print complete report')
             button.clicked.connect(lambda: print(json.dumps(report,indent=2)))
             layout.addWidget(button)

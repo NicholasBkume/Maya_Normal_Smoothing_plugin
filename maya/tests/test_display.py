@@ -87,6 +87,12 @@ class DisplayTests(unittest.TestCase):
         state.undo()
         self.assertNotIn(2,state.hidden)
 
+    def test_wireframe_and_brightness(self):
+        result=display.batches(fixture(),wireframe=True,brightness=.5)
+        wire=[vertices for kind,color,vertices in result if kind=='lines' and color==(.09,.09,.09,1)]
+        self.assertEqual(len(wire),1)
+        self.assertEqual(len(wire[0]),6)
+
     def test_invalid_corner_rejected(self):
         with self.assertRaises(ValueError):
             display.Visibility(2).hide({5})

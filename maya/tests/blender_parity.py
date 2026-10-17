@@ -68,3 +68,40 @@ for operation, run_source, options in cases:
     assert np.allclose(expected,modal._container.new_norms,atol=1e-7), operation
     print('PASS source parity:', operation)
 print('PASS: 9 numerical comparisons with supplied Blender source; not a Maya runtime check')
+
+# Compare actual BMLoop.calc_tangent on convex, concave and collinear corners.
+import bmesh
+fixtures=[[(0,0,0),(2,0,0),(2,2,0),(0,2,0)],
+          [(0,0,0),(2,0,0),(1,1,0),(2,2,0),(0,2,0)],
+          [(0,0,0),(1,0,0),(2,0,0),(2,2,0),(0,2,0)]]
+for points in fixtures:
+    bm=bmesh.new()
+    try:
+        vertices=[bm.verts.new(p) for p in points]
+        face=bm.faces.new(vertices);bm.normal_update()
+        for loop in face.loops:
+            actual=core.corner_tangent(tuple(loop.vert.co),tuple(loop.link_loop_prev.vert.co),
+                                       tuple(loop.link_loop_next.vert.co),tuple(face.normal))
+            assert np.allclose(actual,loop.calc_tangent(),atol=2e-6),(actual,loop.calc_tangent())
+    finally: bm.free()
+print('PASS: actual BMesh corner tangents on convex, concave and collinear polygons')
+
+# Compare source edge/face loop traversal on a regular quad grid.
+points=[(x,y,0) for y in range(4) for x in range(4)]
+faces=[[y*4+x,y*4+x+1,(y+1)*4+x+1,(y+1)*4+x] for y in range(3) for x in range(3)]
+from abnormal_maya import selection
+mesh=core.Mesh(points,faces,[(0,0,1)]*36,[(0,0,1)]*9)
+graph=selection.Topology(mesh)
+bm=bmesh.new()
+try:
+    vertices=[bm.verts.new(p) for p in points]
+    for face in faces: bm.faces.new([vertices[v] for v in face])
+    bm.verts.index_update();bm.edges.index_update();bm.faces.index_update()
+    bm.verts.ensure_lookup_table();bm.edges.ensure_lookup_table();bm.faces.ensure_lookup_table()
+    for edge in bm.edges:
+        endpoints=tuple(sorted(v.index for v in edge.verts))
+        expected={tuple(sorted(v.index for v in bm.edges[i].verts)) for i in source.get_edge_loop(bm,edge)}
+        assert graph.edge_loop(endpoints)==expected,endpoints
+        assert graph.face_ring(endpoints)==set(source.get_face_loop(bm,edge)),endpoints
+finally: bm.free()
+print('PASS: edge loops and face rings match supplied Blender traversal on a quad grid')

@@ -52,6 +52,23 @@ def rotate(vector, axis, angle):
                mul(axis, dot(axis, vector) * (1-c)))
 
 
+def corner_tangent(point,previous,following,face_normal):
+    """BMesh-compatible inward corner tangent, including concave/straight corners.
+
+    Build the corner plane from the incoming and reversed outgoing unit edges,
+    orient that plane consistently with the face, then take its perpendicular.
+    """
+    incoming=unit(sub(previous,point),(0,0,0))
+    reversed_outgoing=unit(sub(point,following),(0,0,0))
+    difference=add(incoming,reversed_outgoing)
+    if all(abs(a-b)<1.1920929e-6 for a,b in zip(incoming,reversed_outgoing)):
+        plane=face_normal
+    else:
+        plane=cross(incoming,reversed_outgoing)
+        if dot(plane,face_normal)<0: plane=mul(plane,-1)
+    return unit(cross(difference,plane),(0,0,0))
+
+
 @dataclass
 class Mesh:
     points: list
@@ -77,8 +94,8 @@ class Mesh:
                 previous, following = vertices[offset-1], vertices[(offset+1) % len(vertices)]
                 self.neighbors[vertex].update((previous, following))
                 p = self.points[vertex]
-                self.tangents.append(unit(add(unit(sub(self.points[previous], p), (0, 0, 0)),
-                                              unit(sub(self.points[following], p), (0, 0, 0)))))
+                self.tangents.append(corner_tangent(p,self.points[previous],self.points[following],
+                                                     self.face_normals[face_id]))
             self.face_corners.append(corners)
         if len(self.normals) != len(self.corner_vertices):
             raise ValueError('Expected exactly one normal per face corner')

@@ -45,7 +45,7 @@ def run(manual=True, report_path=None):
     if candidate and candidate.is_dir() and candidate not in Path(scene.__file__).resolve().parents:
         raise RuntimeError('An older Abnormal Maya is cached. Restart Maya and run this file again. Loaded: ' + scene.__file__)
     if not hasattr(scene.Session, 'history_step'):
-        raise RuntimeError('This runner requires Abnormal Maya 0.9.3. Download the new package and restart Maya.')
+        raise RuntimeError('This runner requires Abnormal Maya 0.9.4. Download the new package and restart Maya.')
     from abnormal_maya import overlay
     if not cmds.undoInfo(query=True, state=True):
         raise RuntimeError('Enable Maya undo before running these tests')
@@ -496,7 +496,7 @@ def run(manual=True, report_path=None):
         result=session.current()
         vectors([result.normals[1]],[result.normals[0]],'active to selection')
 
-    @case('Native edge shading parity, undo and exact normal restoration')
+    @case('Native edge shading parity, native/session undo and exact restoration')
     def shading_state():
         cube,shape,session,mesh=fixture()
         original_fn=om.MFnMesh(scene.mesh_path(shape))
@@ -544,7 +544,29 @@ def run(manual=True, report_path=None):
         check(tuple(fn.isNormalLocked(i) for i in ids)==soft_locks,
               'Native redo lost smooth normal locks')
 
-        # Editor history must preserve exact states, not merely flags.
+        # Editor history is intentionally independent of Maya's native undo.
+        # Native undo/redo can change selection (or round-trip floating-point
+        # normals with tiny differences). History.move() snapshots that
+        # *external* state as its own entry before undoing an editor action.
+        recorded_state=session.history.states[session.history.position]
+        actual_state=session.snapshot()
+        if actual_state!=recorded_state:
+            changed={key for key in recorded_state
+                     if actual_state[key]!=recorded_state[key]}
+            print('Maya-native undo/redo produced unrecorded session fields:',
+                  ', '.join(sorted(changed)))
+            check(changed<={'selected','active','normals'},
+                  'Native undo/redo unexpectedly changed saved scene data: '+str(changed))
+            if 'normals' in changed:
+                vectors(actual_state['normals'],recorded_state['normals'],
+                        'Native redo unexpectedly changed normals')
+            # The first session undo captures the external state and returns
+            # to the recorded post-shading snapshot (still smooth). The next
+            # undo is the actual shading operation. Do not mislabel the first
+            # undo as a failure to restore the previous edge flags.
+            session.history_step(-1)
+            check(session.snapshot()==recorded_state,
+                  'First session undo did not recover pre-native-history snapshot')
         session.history_step(-1)
         fn=om.MFnMesh(scene.mesh_path(shape))
         check(tuple(fn.isEdgeSmooth(i) for i in range(fn.numEdges))==original_flags,

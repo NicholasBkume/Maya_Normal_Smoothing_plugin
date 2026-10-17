@@ -26,3 +26,10 @@ Documentation, tips and tricks: https://bnpr.gitbook.io/abnormal-wiki/
 3. Report the bug/issue via this link: https://github.com/bnpr/Abnormal/issues
 4. Please describe the bug with the final console print and propose a fix (if possible).
 
+
+## Maya version
+
+A Maya 2024+ / Python 3 implementation is available in [`maya/`](maya/README.md).
+It includes a dockable panel, undoable face-vertex normal editing, symmetry,
+weights, target tools, and normal storage. See that guide for installation,
+validation status, and remaining differences from the Blender add-on.

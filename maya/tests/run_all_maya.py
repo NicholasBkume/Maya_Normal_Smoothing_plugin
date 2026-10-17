@@ -45,7 +45,7 @@ def run(manual=True, report_path=None):
     if candidate and candidate.is_dir() and candidate not in Path(scene.__file__).resolve().parents:
         raise RuntimeError('An older Abnormal Maya is cached. Restart Maya and run this file again. Loaded: ' + scene.__file__)
     if not hasattr(scene.Session, 'history_step'):
-        raise RuntimeError('This runner requires Abnormal Maya 0.9.0. Download the new package and restart Maya.')
+        raise RuntimeError('This runner requires Abnormal Maya 0.9.1. Download the new package and restart Maya.')
     from abnormal_maya import overlay
     if not cmds.undoInfo(query=True, state=True):
         raise RuntimeError('Enable Maya undo before running these tests')
@@ -499,10 +499,23 @@ def run(manual=True, report_path=None):
     @case('Native edge shading state and normal-preserving session restore')
     def shading_state():
         _,shape,session,mesh=fixture()
+        original_flags=tuple(om.MFnMesh(scene.mesh_path(shape)).isEdgeSmooth(i) for i in range(om.MFnMesh(scene.mesh_path(shape)).numEdges))
         session.shading(True)
         fn=om.MFnMesh(scene.mesh_path(shape))
         check(all(fn.isEdgeSmooth(i) for i in range(fn.numEdges)),'Smooth edge flags missing')
         vectors(session.current().normals,mesh.normals,'Shading changed explicit vectors')
+        session.history_step(-1)
+        check(tuple(om.MFnMesh(scene.mesh_path(shape)).isEdgeSmooth(i) for i in range(fn.numEdges))==original_flags,
+              'Session undo did not restore edge flags')
+        vectors(session.current().normals,mesh.normals,'Shading session undo changed normals')
+        session.history_step(1)
+        check(all(om.MFnMesh(scene.mesh_path(shape)).isEdgeSmooth(i) for i in range(fn.numEdges)),
+              'Session redo did not restore smooth flags')
+        vectors(session.current().normals,mesh.normals,'Shading session redo changed normals')
+        session.shading(False)
+        check(not any(om.MFnMesh(scene.mesh_path(shape)).isEdgeSmooth(i) for i in range(fn.numEdges)),
+              'Hard edge flags missing')
+        vectors(session.current().normals,mesh.normals,'Hard shading changed explicit vectors')
         session.restore()
         fn=om.MFnMesh(scene.mesh_path(shape))
         check(tuple(fn.isEdgeSmooth(i) for i in range(fn.numEdges))==session.original_smoothing,

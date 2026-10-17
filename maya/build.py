@@ -9,7 +9,7 @@ def build(destination=None):
     root = Path(__file__).resolve().parent
     destination = Path(destination) if destination else root / 'dist'
     destination.mkdir(parents=True, exist_ok=True)
-    archive = destination / 'AbnormalMaya-0.9.0.zip'
+    archive = destination / 'AbnormalMaya-0.9.4.zip'
     files = [root/'install.py',root/'AbnormalMaya.mod',root/'README.md',root/'PORT_STATUS.md']
     files += [p for p in (root/'tests').glob('*.py') if p.name != 'blender_parity.py']
     if (root/'PROFILE.json').exists(): files.append(root/'PROFILE.json')
@@ -17,7 +17,7 @@ def build(destination=None):
               if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc']
     with ZipFile(archive, 'w', ZIP_DEFLATED) as output:
         for source in sorted(files):
-            output.write(source, 'AbnormalMaya-0.9.0/' + source.relative_to(root).as_posix())
+            output.write(source, 'AbnormalMaya-0.9.4/' + source.relative_to(root).as_posix())
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     archive.with_suffix('.zip.sha256').write_text(digest + '  ' + archive.name + '\n')
     with ZipFile(archive) as check:

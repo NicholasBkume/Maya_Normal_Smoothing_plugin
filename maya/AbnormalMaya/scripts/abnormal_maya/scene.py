@@ -112,10 +112,18 @@ def write_normals(shape, mesh, normals, lock_states=None):
     for i, (old, new) in enumerate(zip(mesh.normals, normals)):
         if len(new)!=3 or not all(math.isfinite(v) for v in new) or core.dot(new, new) < core.EPSILON:
             raise ValueError('Invalid normal at corner {}'.format(i))
+    if lock_states is not None and len(lock_states)!=len(normals):
+        raise ValueError('Normal lock count does not match topology')
+    current_locks=None
+    if lock_states is not None:
+        fn=om.MFnMesh(mesh_path(shape))
+        _,ids=fn.getNormalIds()
+        current_locks=[fn.isNormalLocked(i) for i in ids]
     groups={}
     unlock=[]
     for i,(old,new) in enumerate(zip(mesh.normals,normals)):
-        if lock_states is None and max(abs(a-b) for a,b in zip(old,new))<1e-7:
+        if max(abs(a-b) for a,b in zip(old,new))<1e-7 and (
+                lock_states is None or current_locks[i]==bool(lock_states[i])):
             continue
         item=component(shape,mesh,i)
         groups.setdefault(tuple(new),[]).append(item)
@@ -276,9 +284,11 @@ class Session:
     def restore_snapshot(self,state):
         mesh=self.current()
         with undo_chunk('Abnormal session state'):
+            # First restore edge topology (normal sharing), then read the
+            # resulting normals and only write vectors/locks still different.
             self._set_smoothing(state['smoothing'])
-            mesh=self.current()
-            write_normals(self.shape,mesh,state['normals'],state['locks'])
+            write_normals(self.shape,self.current(),state['normals'],state['locks'])
+            self._check_smoothing(state['smoothing'])
         self.visibility._set(state['hidden'])
         self.weights=None if state['weights'] is None else dict(state['weights'])
         self.clipboard=list(state['clipboard'])
@@ -326,16 +336,23 @@ class Session:
             if fn.isEdgeSmooth(i)!=bool(smooth): groups[bool(smooth)].append(self.shape+'.e[{}]'.format(i))
         for smooth,items in groups.items():
             if items: cmds.polySoftEdge(items,angle=180 if smooth else 0,constructionHistory=False)
+        self._check_smoothing(flags)
+
+    def _check_smoothing(self,flags):
+        observed=om.MFnMesh(mesh_path(self.shape))
+        mismatches=[i for i,expected in enumerate(flags) if observed.isEdgeSmooth(i)!=bool(expected)]
+        if mismatches:
+            raise RuntimeError('Edge smoothing readback failed at edges {}. Undo the operation.'.format(mismatches[:12]))
 
     @recorded
     def shading(self,smooth):
-        mesh=self.current()
         fn=om.MFnMesh(mesh_path(self.shape))
+        # Soft edges share normal IDs in Maya. Requiring every hard-edge
+        # face-corner vector to remain unchanged is incompatible with smoothing
+        # a cube. Let the native undoable command update normal sharing.
+        # Snapshot/native undo must restore original values and lock states.
         with undo_chunk('Abnormal shading'):
-            self._set_smoothing([smooth]*fn.numEdges)
-            # Retaining explicit corner directions after softening requires
-            # freezing changed normals; unlocking them would recompute averages.
-            write_normals(self.shape,self.current(),mesh.normals)
+            self._set_smoothing([bool(smooth)]*fn.numEdges)
 
     @recorded
     def copy_active(self,individual=True):
@@ -444,6 +461,7 @@ class Session:
         with undo_chunk('Abnormal cancel session'):
             self._set_smoothing(self.original_smoothing)
             write_normals(self.shape,self.current(),self.original.normals,self.locks)
+            self._check_smoothing(self.original_smoothing)
         self.closed = True
 
     def save_vectors(self):

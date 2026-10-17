@@ -39,7 +39,10 @@ def project(session, individual=True, size=.4, xray=False, scale_selected=True,s
         proxy=om.MPoint(*core.mean([(v.x,v.y,v.z) for v in wedge]))
         if not xray:
             screen=view.worldToView(proxy)
-            ray_origin,ray_direction=view.viewToWorld(int(screen[0]),int(screen[1]))
+            # Maya API 2.0 fills the supplied output objects; it does not return a pair.
+            ray_origin=om.MPoint()
+            ray_direction=om.MVector()
+            view.viewToWorld(int(screen[0]),int(screen[1]),ray_origin,ray_direction)
             ray_direction.normalize()
             distance=(proxy-ray_origin).length()
             epsilon=max(1e-5,distance*1e-6)

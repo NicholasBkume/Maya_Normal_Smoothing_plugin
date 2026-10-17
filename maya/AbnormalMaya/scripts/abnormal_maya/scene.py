@@ -276,9 +276,8 @@ class Session:
     def restore_snapshot(self,state):
         mesh=self.current()
         with undo_chunk('Abnormal session state'):
-            self._set_smoothing(state['smoothing'])
-            mesh=self.current()
             write_normals(self.shape,mesh,state['normals'],state['locks'])
+            self._set_smoothing(state['smoothing'])
         self.visibility._set(state['hidden'])
         self.weights=None if state['weights'] is None else dict(state['weights'])
         self.clipboard=list(state['clipboard'])
@@ -326,16 +325,29 @@ class Session:
             if fn.isEdgeSmooth(i)!=bool(smooth): groups[bool(smooth)].append(self.shape+'.e[{}]'.format(i))
         for smooth,items in groups.items():
             if items: cmds.polySoftEdge(items,angle=180 if smooth else 0,constructionHistory=False)
+        # A successful polySoftEdge call is not proof that edge flags changed.
+        observed=om.MFnMesh(mesh_path(self.shape))
+        mismatches=[i for i,expected in enumerate(flags) if observed.isEdgeSmooth(i)!=bool(expected)]
+        if mismatches:
+            raise RuntimeError('Edge smoothing readback failed at edges {}. Undo the operation.'.format(mismatches[:12]))
 
     @recorded
     def shading(self,smooth):
         mesh=self.current()
         fn=om.MFnMesh(mesh_path(self.shape))
         with undo_chunk('Abnormal shading'):
+            # 0.9.1 accidentally used write_normals(mesh.normals), which skips
+            # unchanged vectors and therefore NEVER froze the existing normals.
+            # Maya can recalculate unlocked face-vertex normals when an edge is
+            # softened/hardened. Lock them explicitly *before* polySoftEdge.
+            corners=[component(self.shape,mesh,i) for i in range(len(mesh.normals))]
+            if corners:
+                cmds.polyNormalPerVertex(corners,freezeNormal=True)
             self._set_smoothing([smooth]*fn.numEdges)
-            # Retaining explicit corner directions after softening requires
-            # freezing changed normals; unlocking them would recompute averages.
-            write_normals(self.shape,self.current(),mesh.normals)
+            preserved=self.current().normals
+            for i,(before,after) in enumerate(zip(mesh.normals,preserved)):
+                if max(abs(a-b) for a,b in zip(before,after))>2e-4:
+                    raise RuntimeError('Shading changed corner normal {}. Undo the operation.'.format(i))
 
     @recorded
     def copy_active(self,individual=True):
@@ -442,8 +454,8 @@ class Session:
     def restore(self):
         mesh = self.current()
         with undo_chunk('Abnormal cancel session'):
+            write_normals(self.shape,mesh,self.original.normals,self.locks)
             self._set_smoothing(self.original_smoothing)
-            write_normals(self.shape,self.current(),self.original.normals,self.locks)
         self.closed = True
 
     def save_vectors(self):

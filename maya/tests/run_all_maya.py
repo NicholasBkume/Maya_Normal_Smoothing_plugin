@@ -45,7 +45,7 @@ def run(manual=True, report_path=None):
     if candidate and candidate.is_dir() and candidate not in Path(scene.__file__).resolve().parents:
         raise RuntimeError('An older Abnormal Maya is cached. Restart Maya and run this file again. Loaded: ' + scene.__file__)
     if not hasattr(scene.Session, 'history_step'):
-        raise RuntimeError('This runner requires Abnormal Maya 0.9.0. Download the new package and restart Maya.')
+        raise RuntimeError('This runner requires Abnormal Maya 0.9.2. Download the new package and restart Maya.')
     from abnormal_maya import overlay
     if not cmds.undoInfo(query=True, state=True):
         raise RuntimeError('Enable Maya undo before running these tests')
@@ -499,14 +499,51 @@ def run(manual=True, report_path=None):
     @case('Native edge shading state and normal-preserving session restore')
     def shading_state():
         _,shape,session,mesh=fixture()
+        original_fn=om.MFnMesh(scene.mesh_path(shape))
+        original_flags=tuple(original_fn.isEdgeSmooth(i) for i in range(original_fn.numEdges))
+        _,original_ids=original_fn.getNormalIds()
+        original_locks=tuple(original_fn.isNormalLocked(i) for i in original_ids)
         session.shading(True)
         fn=om.MFnMesh(scene.mesh_path(shape))
         check(all(fn.isEdgeSmooth(i) for i in range(fn.numEdges)),'Smooth edge flags missing')
         vectors(session.current().normals,mesh.normals,'Shading changed explicit vectors')
+        _,ids=fn.getNormalIds()
+        check(all(fn.isNormalLocked(i) for i in ids),'Shading failed to freeze original corner normals')
+        # Native Maya undo must roll back BOTH commands as a single chunk.
+        cmds.undo()
+        fn=om.MFnMesh(scene.mesh_path(shape))
+        check(tuple(fn.isEdgeSmooth(i) for i in range(fn.numEdges))==original_flags,
+              'Native undo did not restore original edge flags')
+        vectors(session.current().normals,mesh.normals,'Native undo changed normals')
+        _,ids=fn.getNormalIds()
+        check(tuple(fn.isNormalLocked(i) for i in ids)==original_locks,
+              'Native undo did not restore original normal locks')
+        cmds.redo()
+        fn=om.MFnMesh(scene.mesh_path(shape))
+        check(all(fn.isEdgeSmooth(i) for i in range(fn.numEdges)),'Native redo lost soft edge flags')
+        vectors(session.current().normals,mesh.normals,'Native redo changed normals')
+        _,ids=fn.getNormalIds()
+        check(all(fn.isNormalLocked(i) for i in ids),'Native redo lost frozen normal locks')
+        session.history_step(-1)
+        check(tuple(om.MFnMesh(scene.mesh_path(shape)).isEdgeSmooth(i) for i in range(fn.numEdges))==original_flags,
+              'Session undo did not restore edge flags')
+        vectors(session.current().normals,mesh.normals,'Shading session undo changed normals')
+        session.history_step(1)
+        check(all(om.MFnMesh(scene.mesh_path(shape)).isEdgeSmooth(i) for i in range(fn.numEdges)),
+              'Session redo did not restore smooth flags')
+        vectors(session.current().normals,mesh.normals,'Shading session redo changed normals')
+        session.shading(False)
+        check(not any(om.MFnMesh(scene.mesh_path(shape)).isEdgeSmooth(i) for i in range(fn.numEdges)),
+              'Hard edge flags missing')
+        vectors(session.current().normals,mesh.normals,'Hard shading changed explicit vectors')
         session.restore()
         fn=om.MFnMesh(scene.mesh_path(shape))
         check(tuple(fn.isEdgeSmooth(i) for i in range(fn.numEdges))==session.original_smoothing,
               'Cancel did not restore edge flags')
+        vectors(session.current().normals,mesh.normals,'Cancel did not restore original normals')
+        _,ids=fn.getNormalIds()
+        check(tuple(fn.isNormalLocked(i) for i in ids)==original_locks,
+              'Cancel did not restore original normal locks')
 
     @case('Direct projection, occlusion and topology selection adapters')
     def picking_adapters():
